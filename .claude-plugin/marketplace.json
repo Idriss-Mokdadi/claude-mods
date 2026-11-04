@@ -1,0 +1,30 @@
+{
+  "name": "claude-mods",
+  "description": "Personal Claude Code mods: usage cockpit, subagent progress, file tree and ask-before-save memory.",
+  "owner": {
+    "name": "Mohamed Idriss Mokdadi",
+    "url": "https://github.com/Idriss-Mokdadi"
+  },
+  "plugins": [
+    {
+      "name": "cockpit",
+      "source": "./plugins/cockpit",
+      "description": "Usage band and panel, model and effort advisor, budget guard, /handoff, cache timer."
+    },
+    {
+      "name": "savvy-progress-plus",
+      "source": "./plugins/savvy-progress-plus",
+      "description": "Progress bar for multi-step work and a /crew panel of subagents (fork of savvy-progress)."
+    },
+    {
+      "name": "workspace",
+      "source": "./plugins/workspace",
+      "description": "Read-only file tree pane (/tree) with marks on files Claude read, edited or created."
+    },
+    {
+      "name": "memory",
+      "source": "./plugins/memory",
+      "description": "Spots your preferences and asks before saving each one to CLAUDE.md."
+    }
+  ]
+}
