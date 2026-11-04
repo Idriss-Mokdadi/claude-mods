@@ -313,9 +313,13 @@ test('cache line counts down m:ss left, then sleeps when cold', async ($, on) =>
   const ui = await band($, 'terminal')
   await ui.press({ key: 'cockpit-usage' })
   expect(await ui.find({ type: 'Text', text: /🧊 Cache 59:00 left \(\?\)/ })).toBeDefined()
-  await clock.advance(60 * 60_000)
-  expect(await ui.find({ type: 'Text', text: /🧊 Cache cold.*😴/ })).toBeDefined()
+  // Unmounted while the hour passes: the 5 s ticks then redraw nothing, so the
+  // advance is quick; the band stays expanded and is mounted again after.
   await ui.unmount()
+  await clock.advance(60 * 60_000)
+  const later = await band($, 'terminal')
+  expect(await later.find({ type: 'Text', text: /🧊 Cache cold.*😴/ })).toBeDefined()
+  await later.unmount()
 })
 
 test('/handoff writes one note with a single cheap call', async ($, on) => {
@@ -398,11 +402,15 @@ test('keep-alive is off by default: no ping when the cache nears its TTL', async
   expect(w.forks).toBe(0)
 })
 
-test('keep-alive on: pings with a fork before the TTL, at most N times', { options: { keepAlive: true, keepAliveMaxPings: 2 } }, async ($, on) => {
+test('keep-alive on: pings with a fork before the TTL, at most N times', { options: { keepAlive: true, keepAliveMaxPings: 2, cacheTtl: '5m' } }, async ($, on) => {
   const { clock, w } = await start($, on)
   await $.turn.complete({ turnId: 't', answer: 'a', durationMs: 1, isAborted: false, reason: 'answer' } as never)
-  // 1h TTL on a subscription (limits are reported): pings start 3 min before the end.
-  for (let i = 0; i < 6 * 12; i++) await clock.advance((60 * 60_000) / 12)
+  // 5 min TTL: a ping 45 s before the end refreshes the cache; after two, no more.
+  await clock.advance(4 * 60_000)
+  expect(w.forks).toBe(0)
+  await clock.advance(30_000)
+  expect(w.forks).toBe(1)
+  await clock.advance(16 * 60_000)
   expect(w.forks).toBe(2)
 })
 
