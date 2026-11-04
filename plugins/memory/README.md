@@ -36,7 +36,8 @@ Spots corrections and preferences in your prompts and **asks before every save**
 ## Install
 
 ```
-/plugin install memory --marketplace Idriss-Mokdadi/claude-mods
+/plugin marketplace add Idriss-Mokdadi/claude-mods
+/plugin install memory@claude-mods
 ```
 
 ## Development

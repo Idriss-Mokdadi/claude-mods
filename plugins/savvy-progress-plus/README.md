@@ -3,7 +3,8 @@
 A Claude Code mod: a progress bar above the prompt for any multi-step work, and a live crew panel of subagents. Fork of [savvy-progress](https://github.com/JohnnyVizz/claude-kit/tree/main/plugins/savvy-progress) v1.2.1 (MIT, see `THIRD_PARTY_NOTICES.md`). Every name is its own, so it installs next to the original without clashes.
 
 ```
-/plugin install savvy-progress-plus --marketplace Idriss-Mokdadi/claude-mods
+/plugin marketplace add Idriss-Mokdadi/claude-mods
+/plugin install savvy-progress-plus@claude-mods
 ```
 
 ## What it does

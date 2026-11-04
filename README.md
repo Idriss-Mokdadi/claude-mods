@@ -11,13 +11,21 @@ Personal Claude Code mods by Mohamed Idriss Mokdadi. Private repo, personal use.
 
 ## Install
 
-Type each line at the Claude Code prompt (answer `y` to add the marketplace, then pick a scope):
+First add this repo as a marketplace (once per machine or cloud environment):
 
 ```
-/plugin install cockpit --marketplace Idriss-Mokdadi/claude-mods
-/plugin install savvy-progress-plus --marketplace Idriss-Mokdadi/claude-mods
-/plugin install workspace --marketplace Idriss-Mokdadi/claude-mods
-/plugin install memory --marketplace Idriss-Mokdadi/claude-mods
+/plugin marketplace add Idriss-Mokdadi/claude-mods
 ```
+
+Then install each mod:
+
+```
+/plugin install cockpit@claude-mods
+/plugin install savvy-progress-plus@claude-mods
+/plugin install workspace@claude-mods
+/plugin install memory@claude-mods
+```
+
+Run `/reload-plugins` or start a new session to load them. Private repo: the machine needs GitHub access to it (`gh auth login` locally; in a cloud session, select this repo for the session).
 
 Each mod's own README lists its settings and limits. Rules for building mods here: `CONVENTIONS.md`.

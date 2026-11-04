@@ -5,7 +5,8 @@ A usage cockpit for Claude Code: one band above the prompt and one panel that sh
 ## Install
 
 ```
-/plugin install cockpit --marketplace Idriss-Mokdadi/claude-mods
+/plugin marketplace add Idriss-Mokdadi/claude-mods
+/plugin install cockpit@claude-mods
 ```
 
 ## What it shows

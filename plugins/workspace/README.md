@@ -5,7 +5,8 @@ A read-only file tree pane beside the chat. It lists the session's working direc
 ## Install
 
 ```
-/plugin install workspace --marketplace Idriss-Mokdadi/claude-mods
+/plugin marketplace add Idriss-Mokdadi/claude-mods
+/plugin install workspace@claude-mods
 ```
 
 ## What it does

@@ -40,5 +40,5 @@ Each mod is built by its own agent on its own branch. Follow these rules so the 
 2. The mod type-checks (`tsc -p plugins/<mod-name>` once its types are laid, or the tsconfig from the types header).
 3. `claude plugin test plugins/<mod-name>` passes, with tests for the main behaviours.
 4. `plugins/<mod-name>/README.md`: what it does, commands, settings, limits, install line:
-   `/plugin install <mod-name> --marketplace Idriss-Mokdadi/claude-mods`
+   `/plugin marketplace add Idriss-Mokdadi/claude-mods` then `/plugin install <mod-name>@claude-mods`
 5. Committed and pushed to `mod/<mod-name>`.
