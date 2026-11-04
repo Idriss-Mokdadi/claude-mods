@@ -1,0 +1,44 @@
+{
+  "name": "workspace",
+  "version": "0.1.0",
+  "description": "File tree pane beside the chat (/tree): the working directory read-only, with live marks on files Claude read, edited or created this session.",
+  "author": {
+    "name": "Mohamed Idriss Mokdadi",
+    "url": "https://github.com/Idriss-Mokdadi"
+  },
+  "license": "MIT",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "language": {
+      "type": "string",
+      "title": "Pane language",
+      "description": "en (English), fr (French) or ar (Arabic, drawn right to left)",
+      "default": "en",
+      "options": ["en", "fr", "ar"]
+    },
+    "maxDepth": {
+      "type": "number",
+      "title": "Deepest folder level",
+      "description": "Folders deeper than this many levels below the working directory are not opened (1 to 32)",
+      "default": 8
+    },
+    "maxEntries": {
+      "type": "number",
+      "title": "Most entries listed",
+      "description": "The tree stops listing after this many files and folders in all, so huge repositories stay fast (50 to 20000)",
+      "default": 3000
+    },
+    "showHidden": {
+      "type": "boolean",
+      "title": "Show hidden files",
+      "description": "List dotfiles and dot folders (.git is always skipped)",
+      "default": false
+    },
+    "showBand": {
+      "type": "boolean",
+      "title": "Button above the prompt",
+      "description": "Show the small Files button in the band above the prompt",
+      "default": true
+    }
+  }
+}
