@@ -1,7 +1,7 @@
 {
   "name": "cockpit",
-  "version": "0.2.0",
-  "description": "Usage cockpit: one small Usage button above the prompt that expands to one line per item (context, 5h and 7d limits, cost, cache, model fit) with progress bars, mood crabs and what uses your tokens; a free model and effort advisor; a budget guard with Compact and Handoff; /handoff notes; /usage-panel.",
+  "version": "0.3.0",
+  "description": "Usage cockpit: one small Usage button above the prompt that expands to one line per item (context, 5h and 7d limits, cost, cache, model fit) with progress bars, pixel crab icons whose mood follows each bar and what uses your tokens; a free model and effort advisor; a budget guard with Compact and Handoff; /handoff notes; /usage-panel.",
   "author": {
     "name": "Mohamed Idriss Mokdadi",
     "url": "https://github.com/Idriss-Mokdadi"

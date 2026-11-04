@@ -3,6 +3,8 @@ import type { EngineInterface, Register, SessionMessage, SessionUsage, PluginOpt
 
 import type { Advice, Cache, Handoff, Level, Limit, Mood, PaneData, Snapshot, Tone } from '../types'
 import { CLAY, CRAB_CSS, crab, crabText } from './crab'
+import { crabIcon, iconWidth } from './crab-icons'
+import type { IconKind } from './crab-icons'
 import { STRINGS, fill, langOf } from './i18n'
 import type { Lang, Strings } from './i18n'
 import {
@@ -441,6 +443,9 @@ type Line = {
   key: string
   crab?: Mood
   emoji: string
+  // The pixel crab drawn on desktop and mobile in place of the emoji.
+  icon: IconKind
+  cold?: boolean
   label: string
   value: string
   pct: number
@@ -491,6 +496,7 @@ async function viewOf($: EngineInterface): Promise<View> {
     key: 'ctx',
     crab: crabFor(ctxTone),
     emoji: '🧠',
+    icon: 'context',
     label: s.lineContext,
     value: ctx === null || ctx === undefined ? s.noReading : `${Math.round(ctx)}% · ${fmtTokens(snap?.contextTokens ?? 0)} / ${fmtTokens(snap?.window ?? 0)}`,
     pct: ctx ?? 0,
@@ -504,20 +510,20 @@ async function viewOf($: EngineInterface): Promise<View> {
     if (!l) continue
     const t = toneOf(l.percent, w, k)
     const reset = resetIn(l, at)
-    lines.push({ key: kind, crab: crabFor(t), emoji, label, value: `${Math.round(l.percent)}%${reset ? ` · ${s.resetsIn} ${reset}` : ''}`, pct: l.percent, tone: t })
+    lines.push({ key: kind, crab: crabFor(t), emoji, icon: kind, label, value: `${Math.round(l.percent)}%${reset ? ` · ${s.resetsIn} ${reset}` : ''}`, pct: l.percent, tone: t })
   }
   if (snap?.costUsd !== null && snap?.costUsd !== undefined) {
     const pct = (snap.costUsd / opts.costBudget) * 100
     const t = toneOf(pct, w, k)
     const extra = c.pingUsd ? ` · ${s.pings} ≈${fmtCost(c.pingUsd)}` : ''
-    lines.push({ key: 'cost', crab: crabFor(t), emoji: '💵', label: s.lineCost, value: `${fmtCost(snap.costUsd)} ${fill(s.ofBudget, { usd: fmtCost(opts.costBudget) })}${extra}`, pct, tone: t })
+    lines.push({ key: 'cost', crab: crabFor(t), emoji: '💵', icon: 'cost', label: s.lineCost, value: `${fmtCost(snap.costUsd)} ${fill(s.ofBudget, { usd: fmtCost(opts.costBudget) })}${extra}`, pct, tone: t })
   }
   const ttl = ttlOf(c, snap)
   const idle = c.touchedAt ? at - c.touchedAt : 0
   if (!c.touchedAt) {
-    lines.push({ key: 'cache', crab: 'calm', emoji: '🧊', label: s.lineCache, value: s.noCache, pct: 0, tone: null, end: '' })
+    lines.push({ key: 'cache', crab: 'calm', emoji: '🧊', icon: 'cache', label: s.lineCache, value: s.noCache, pct: 0, tone: null, end: '' })
   } else if (idle >= ttl.ms) {
-    lines.push({ key: 'cache', crab: 'sleep', emoji: '🧊', label: s.lineCache, value: s.cold, pct: 0, tone: null, end: '😴' })
+    lines.push({ key: 'cache', crab: 'sleep', emoji: '🧊', icon: 'cache', cold: true, label: s.lineCache, value: s.cold, pct: 0, tone: null, end: '😴' })
   } else {
     const leftPct = ((ttl.ms - idle) / ttl.ms) * 100
     const t = toneOf(100 - leftPct, w, k)
@@ -526,6 +532,7 @@ async function viewOf($: EngineInterface): Promise<View> {
       key: 'cache',
       crab: crabFor(t),
       emoji: '🧊',
+      icon: 'cache',
       label: s.lineCache,
       value: `${fmtLeft(ttl.ms - idle)} ${s.left}${ttl.isGuess ? ' (?)' : ''}${ping}`,
       pct: leftPct,
@@ -541,13 +548,14 @@ async function viewOf($: EngineInterface): Promise<View> {
         key: 'model',
         crab: mt === 'red' ? 'angry' : 'gauge',
         emoji: '🤖',
+        icon: 'model',
         label: s.lineModel,
         value: `${s.now}: ${curName} · ${cur ?? '?'} → ${s.suggest} ${a.model} · ${a.effort} · ${fitWord(a)}`,
         pct: ((effortRank(cur) + 1) / EFFORTS.length) * 100,
         marker: ((effortRank(a.effort) + 1) / EFFORTS.length) * 100,
         tone: mt,
       }
-    : { key: 'model', crab: 'gauge', emoji: '🤖', label: s.lineModel, value: `${s.now}: ${curName} · ${cur ?? '?'} · ${s.noAdvice}`, pct: ((effortRank(cur) + 1) / EFFORTS.length) * 100, tone: null }
+    : { key: 'model', crab: 'gauge', emoji: '🤖', icon: 'model', label: s.lineModel, value: `${s.now}: ${curName} · ${cur ?? '?'} · ${s.noAdvice}`, pct: ((effortRank(cur) + 1) / EFFORTS.length) * 100, tone: null }
   if (opts.advisor) lines.push(modelLine)
 
   const { pct } = budgetOf(snap)
@@ -563,6 +571,7 @@ const breakdownLines = (d: PaneData | null): Line[] => {
   return d.rows.map((r, i) => ({
     key: `cat-${i}`,
     emoji: categoryIcon(r.name),
+    icon: categoryKind(r.name),
     label: r.name,
     value: `${fmtTokens(r.tokens)} · ${Math.round((r.tokens / max) * 100)}%`,
     pct: (r.tokens / max) * 100,
@@ -571,6 +580,11 @@ const breakdownLines = (d: PaneData | null): Line[] => {
 }
 
 const KIND_EMOJI = { tool: '🔧', mcp: '🔌', skill: '🧩', agent: '🦀' } as const
+const KIND_ICON: Record<keyof typeof KIND_EMOJI, IconKind> = { tool: 'tools', mcp: 'mcp', skill: 'skills', agent: 'breakdown' }
+
+// The /context category a breakdown row is, as a crab icon.
+export const categoryKind = (name: string): IconKind =>
+  /system prompt/i.test(name) ? 'system_prompt' : /mcp/i.test(name) ? 'mcp' : /system tools|built-?in|tools/i.test(name) ? 'tools' : /skill/i.test(name) ? 'skills' : /memory/i.test(name) ? 'memory' : /message/i.test(name) ? 'messages' : /agent/i.test(name) ? 'breakdown' : 'usage'
 
 const attrLines = (d: PaneData | null, limit: number): Line[] => {
   if (!d) return []
@@ -578,6 +592,7 @@ const attrLines = (d: PaneData | null, limit: number): Line[] => {
   return d.attribution.slice(0, limit).map((r, i) => ({
     key: `attr-${i}`,
     emoji: KIND_EMOJI[r.kind],
+    icon: KIND_ICON[r.kind],
     label: r.key.replace(/^mcp__/, ''),
     value: `≈${fmtTokens(r.tokens)} · ${r.calls} ${tr().calls}`,
     pct: (r.tokens / total) * 100,
@@ -585,9 +600,9 @@ const attrLines = (d: PaneData | null, limit: number): Line[] => {
   }))
 }
 
-const listLines = (prefix: string, emoji: string, list: { name: string; tokens: number }[]): Line[] => {
+const listLines = (prefix: string, emoji: string, icon: IconKind, list: { name: string; tokens: number }[]): Line[] => {
   const top = Math.max(1, ...list.map(x => x.tokens))
-  return list.map((x, i) => ({ key: `${prefix}-${i}`, emoji, label: x.name, value: fmtTokens(x.tokens), pct: (x.tokens / top) * 100, tone: null }))
+  return list.map((x, i) => ({ key: `${prefix}-${i}`, emoji, icon, label: x.name, value: fmtTokens(x.tokens), pct: (x.tokens / top) * 100, tone: null }))
 }
 
 // ---------------------------------------------------------------------------
@@ -743,41 +758,39 @@ export const register: Register = (on, options) => {
     const v = await viewOf($)
     const data = await read($, pane)
     const all = await read($, showAll)
-    const size = sizeOf(e.props.bodyColumns, e.surface !== 'terminal' && 'Svg' in ui)
+    const size = sizeOf(e.props.bodyColumns, e.surface !== 'terminal' && 'Svg' in ui, 32)
     const { Box, Text, Button } = ui
-    const switchBtn = switchButton(ui, $, v)
+    const switchBtn = switchButton(ui, $, v, size)
     const more: Line[] = all && data
       ? [
-          ...listLines('mcp', '🔌', data.mcpServers),
-          ...listLines('mem', '🗂️', data.memory.map(m => ({ name: m.path, tokens: m.tokens }))),
-          ...listLines('skill', '🧩', data.skills),
+          ...listLines('mcp', '🔌', 'mcp', data.mcpServers),
+          ...listLines('mem', '🗂️', 'memory', data.memory.map(m => ({ name: m.path, tokens: m.tokens }))),
+          ...listLines('skill', '🧩', 'skills', data.skills),
         ]
       : []
     return (
       <Box flexDirection="column" alignItems={isRtl() ? 'flex-end' : undefined}>
         {header(ui, $, v, size, false)}
         {v.status.map(l => lineEl(ui, l, size, l.key === 'model' ? switchBtn : null))}
-        {guardButtons(ui, $, v)}
-        <Text bold>🔎 {s.whatUses}</Text>
+        {guardButtons(ui, $, v, size)}
+        {heading(ui, size, 'breakdown', s.whatUses)}
         {data === null ? <Text dimColor>{s.loading}</Text> : null}
         {data?.error ? <Text color="red">{data.error}</Text> : null}
         {breakdownLines(data).map(l => lineEl(ui, l, size))}
         {data ? (
-          <Text bold>
-            🏆 {s.topUsers} <Text dimColor>({s.estimate})</Text>
-          </Text>
+          heading(ui, size, 'usage', s.topUsers, s.estimate)
         ) : null}
         {attrLines(data, all ? 1000 : 5).map(l => lineEl(ui, l, size))}
         {all && data
           ? [
-              lineEl(ui, { key: 'you', emoji: '🙋', label: s.userTokens, value: `≈${fmtTokens(data.userTokens)}`, pct: 0, tone: null }, size),
-              lineEl(ui, { key: 'reply', emoji: '💬', label: s.replyTokens, value: `≈${fmtTokens(data.replyTokens)}`, pct: 0, tone: null }, size),
+              lineEl(ui, { key: 'you', emoji: '🙋', icon: 'messages', label: s.userTokens, value: `≈${fmtTokens(data.userTokens)}`, pct: 0, tone: null }, size),
+              lineEl(ui, { key: 'reply', emoji: '💬', icon: 'messages', label: s.replyTokens, value: `≈${fmtTokens(data.replyTokens)}`, pct: 0, tone: null }, size),
             ]
           : null}
-        {more.length ? <Text bold>📚 {s.mcpBy} · {s.memory} · {s.skills}</Text> : null}
+        {more.length ? heading(ui, size, 'memory', `${s.mcpBy} · ${s.memory} · ${s.skills}`) : null}
         {more.map(l => lineEl(ui, l, size))}
         <Box flexDirection="row" gap={1} flexWrap="wrap">
-          <Button key="refresh" label={`🔄 ${s.refresh}`} plain onPress={() => refreshData($, 'full')} />
+          <Button key="refresh" label={size.isSvg ? s.refresh : `🔄 ${s.refresh}`} plain onPress={() => refreshData($, 'full')} />
           <Button key="show-all" label={all ? `▴ ${s.showLess}` : `▾ ${s.showAll}`} plain onPress={() => update($, showAll, x => !x)} />
         </Box>
         {data ? <Text dimColor>{s.estimateNote}</Text> : null}
@@ -810,15 +823,13 @@ export const register: Register = (on, options) => {
     return (
       <Box flexDirection="column">
         {header(ui, $, v, size, true)}
-        {v.status.map(l => lineEl(ui, l, size, l.key === 'model' ? switchButton(ui, $, v) : null))}
-        {guardButtons(ui, $, v)}
-        <Text bold>🔎 {s.whatUses}</Text>
+        {v.status.map(l => lineEl(ui, l, size, l.key === 'model' ? switchButton(ui, $, v, size) : null))}
+        {guardButtons(ui, $, v, size)}
+        {heading(ui, size, 'breakdown', s.whatUses)}
         {data === null ? <Text dimColor>{s.loading}</Text> : null}
         {breakdownLines(data).map(l => lineEl(ui, l, size))}
         {data && data.attribution.length ? (
-          <Text bold>
-            🏆 {s.topUsers} <Text dimColor>({s.estimate})</Text>
-          </Text>
+          heading(ui, size, 'usage', s.topUsers, s.estimate)
         ) : null}
         {attrLines(data, 5).map(l => lineEl(ui, l, size))}
         {below as never}
@@ -833,11 +844,11 @@ export const register: Register = (on, options) => {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type El = any
 type UI = { Box: El; Text: El; Button: El; Svg?: El }
-type Size = { W: number; barW: number; isSvg: boolean }
+type Size = { W: number; barW: number; isSvg: boolean; iconPx: number }
 
-const sizeOf = (columns: number, isSvg: boolean): Size => {
+const sizeOf = (columns: number, isSvg: boolean, iconPx = 26): Size => {
   const cols = Math.max(20, columns || 60)
-  return { W: Math.max(140, Math.min(720, cols * 8 - 24)), barW: Math.max(8, Math.min(30, cols - 6)), isSvg }
+  return { W: Math.max(140, Math.min(720, cols * 8 - 24)), barW: Math.max(8, Math.min(30, cols - 6)), isSvg, iconPx }
 }
 
 const crabEl = (ui: UI, mood: Mood, size: Size, tone: Tone | null = null) => {
@@ -846,18 +857,56 @@ const crabEl = (ui: UI, mood: Mood, size: Size, tone: Tone | null = null) => {
   return <Text color={tone === 'red' ? TONE_COLOR.red : CLAY}>{crabText(mood)}</Text>
 }
 
+// The tone a line's crab shows: its bar's, or for a bar with no tone of its
+// own (a share of the window), the tone that share would have.
+export const iconTone = (l: Pick<Line, 'tone' | 'pct'>): Tone => l.tone ?? toneOf(l.pct, opts.warn, opts.crit)
+
+function iconEl(ui: UI, kind: IconKind, tone: Tone, size: Size, l?: Line) {
+  const { Svg } = ui
+  const px = size.iconPx
+  const pct = kind === 'context' ? l?.pct : undefined
+  return <Svg source={crabIcon(kind, tone, { size: px, pct, cold: l?.cold, mirror: isRtl() })} alt={`${kind} ${l?.cold ? 'cold' : tone}`} width={iconWidth(px)} height={px} />
+}
+
+function heading(ui: UI, size: Size, kind: IconKind, title: string, note?: string) {
+  const { Box, Text } = ui
+  const emoji = kind === 'breakdown' ? '🔎' : kind === 'usage' ? '🏆' : '📚'
+  return (
+    <Box key={`h-${kind}`} flexDirection={isRtl() ? 'row-reverse' : 'row'} gap={1} alignItems="center">
+      {size.isSvg ? <Box flexShrink={0}>{iconEl(ui, kind, 'green', size)}</Box> : null}
+      <Box flexShrink={1}>
+        <Text bold>
+          {size.isSvg ? '' : `${emoji} `}
+          {title}
+          {note ? <Text dimColor> ({note})</Text> : null}
+        </Text>
+      </Box>
+    </Box>
+  )
+}
+
 function lineEl(ui: UI, l: Line, size: Size, extra: unknown = null) {
   const { Box, Text, Svg } = ui
   const end = lineEnd(l)
   return (
     <Box key={l.key} flexDirection="column" marginBottom={size.isSvg ? 0 : 1}>
       <Box flexDirection={isRtl() ? 'row-reverse' : 'row'} gap={1} alignItems="center">
-        {l.crab ? <Box flexShrink={0}>{crabEl(ui, l.crab, size, l.tone)}</Box> : null}
+        {size.isSvg ? (
+          <Box flexShrink={0}>{iconEl(ui, l.icon, iconTone(l), size, l)}</Box>
+        ) : l.crab ? (
+          <Box flexShrink={0}>{crabEl(ui, l.crab, size, l.tone)}</Box>
+        ) : null}
         <Box flexShrink={1}>
-          <Text>
-            {l.emoji} <Text bold>{l.label}</Text> <Text color={l.tone ? TONE_COLOR[l.tone] : undefined}>{l.value}</Text>
-            {end ? ` ${end}` : ''}
-          </Text>
+          {size.isSvg ? (
+            <Text>
+              <Text bold>{l.label}</Text> <Text color={l.tone ? TONE_COLOR[l.tone] : undefined}>{l.value}</Text>
+            </Text>
+          ) : (
+            <Text>
+              {l.emoji} <Text bold>{l.label}</Text> <Text color={l.tone ? TONE_COLOR[l.tone] : undefined}>{l.value}</Text>
+              {end ? ` ${end}` : ''}
+            </Text>
+          )}
         </Box>
       </Box>
       {extra ? (
@@ -877,32 +926,34 @@ function lineEl(ui: UI, l: Line, size: Size, extra: unknown = null) {
 function header($ui: UI, $: EngineInterface, v: View, size: Size, isBand: boolean) {
   const { Box, Button, Text } = $ui
   const s = tr()
-  const label = `${size.isSvg ? '' : crabText(v.mood) + ' '}📊 ${s.bandUsage} ${TONE_EMOJI[v.worst]}`
+  const label = size.isSvg ? s.bandUsage : `${crabText(v.mood)} 📊 ${s.bandUsage} ${TONE_EMOJI[v.worst]}`
   return (
     <Box key="cockpit-head" flexDirection={isRtl() ? 'row-reverse' : 'row'} gap={1} alignItems="center" flexWrap="wrap">
-      {size.isSvg ? crabEl($ui, v.mood, size) : null}
+      {size.isSvg ? iconEl($ui, 'usage', v.worst, size) : null}
       {isBand ? <Button key="cockpit-usage" label={label} plain onPress={() => toggleBand($)} /> : <Text bold>{label}</Text>}
     </Box>
   )
 }
 
-function guardButtons(ui: UI, $: EngineInterface, v: View) {
+function guardButtons(ui: UI, $: EngineInterface, v: View, size: Size) {
   const { Box, Button } = ui
   const s = tr()
   return (
     <Box key="cockpit-guard" flexDirection="row" gap={1} flexWrap="wrap">
-      {v.level === 'critical' ? <Button key="cockpit-compact" label={`🗜️ ${s.compact}`} variant="primary" onPress={() => compactNow($)} /> : null}
-      {v.level === 'critical' ? <Button key="cockpit-handoff" label={`🧳 ${s.handoff}`} onPress={() => runHandoff($)} /> : null}
-      <Button key="cockpit-full" label={`📋 ${s.fullList}`} plain onPress={() => openPane($)} />
+      {v.level === 'critical' && size.isSvg ? iconEl(ui, 'compact', 'red', size) : null}
+      {v.level === 'critical' ? <Button key="cockpit-compact" label={size.isSvg ? s.compact : `🗜️ ${s.compact}`} variant="primary" onPress={() => compactNow($)} /> : null}
+      {v.level === 'critical' && size.isSvg ? iconEl(ui, 'handoff', 'orange', size) : null}
+      {v.level === 'critical' ? <Button key="cockpit-handoff" label={size.isSvg ? s.handoff : `🧳 ${s.handoff}`} onPress={() => runHandoff($)} /> : null}
+      <Button key="cockpit-full" label={size.isSvg ? s.fullList : `📋 ${s.fullList}`} plain onPress={() => openPane($)} />
     </Box>
   )
 }
 
-function switchButton(ui: UI, $: EngineInterface, v: View) {
+function switchButton(ui: UI, $: EngineInterface, v: View, size: Size) {
   const { Button } = ui
   const a = v.advice
   if (!a || modelTone(a) === 'green') return null
-  return <Button key="cockpit-switch" label={`🔀 ${tr().apply} → ${a.model} · ${a.effort}`} plain onPress={() => switchTo($, a)} />
+  return <Button key="cockpit-switch" label={`${size.isSvg ? '' : '🔀 '}${tr().apply} → ${a.model} · ${a.effort}`} plain onPress={() => switchTo($, a)} />
 }
 
 async function ttlHook($: EngineInterface, e: { cache_ttl?: string }): Promise<void> {

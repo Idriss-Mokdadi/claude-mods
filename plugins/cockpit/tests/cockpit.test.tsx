@@ -136,6 +136,14 @@ const submit = ($: Engine, text: string, kind = 'composer') => $.prompt.submit({
 
 const SURFACES = ['terminal', 'desktop'] as const
 
+// On desktop and mobile the emoji is a pixel crab: the words stay, the emoji goes.
+const say = (surface: 'terminal' | 'desktop', re: RegExp): RegExp =>
+  surface === 'terminal' ? re : new RegExp(re.source.replace(/^(\\p\{Extended_Pictographic\}|[^\x00-\x7F]+)\s*/u, ''), re.flags)
+
+// The crabs a drawing holds, by their alt text: `<kind> <tone>`.
+const crabs = async (ui: { findAll: (q: { type: string }) => Promise<{ props: Record<string, unknown> }[]> }) =>
+  (await ui.findAll({ type: 'Svg' })).map(x => String(x.props.alt)).filter(a => /^[a-z_]+ (green|yellow|orange|red|cold)$/.test(a))
+
 const band = ($: Engine, surface: 'terminal' | 'desktop') => $.ui.mount({ plugin: PLUGIN, surface, ...BAND } as never)
 
 for (const surface of SURFACES) {
@@ -143,7 +151,11 @@ for (const surface of SURFACES) {
     await start($, on)
     const ui = await band($, surface)
     const btn = (await ui.find({ key: 'cockpit-usage' })) as unknown as { props: { label: string } } | undefined
-    expect(btn?.props.label).toMatch(/📊 Usage 😊$/)
+    if (surface === 'terminal') expect(btn?.props.label).toMatch(/📊 Usage 😊$/)
+    else {
+      expect(btn?.props.label).toBe('Usage')
+      expect(await crabs(ui)).toEqual(['usage green'])
+    }
     expect(await ui.find({ type: 'Text', text: /Context/ })).toBeUndefined()
     expect(await ui.find({ key: 'cockpit-compact' })).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: /^engine$/ })).toBeDefined()
@@ -156,7 +168,7 @@ for (const surface of SURFACES) {
     const ui = await band($, surface)
     await ui.press({ key: 'cockpit-usage' })
     for (const label of [/🧠 Context/, /⏱️ 5-hour limit.*resets in 2h 13m/, /📅 7-day limit/, /💵 Session cost.*\$1\.23 of \$5\.00 budget/, /🧊 Cache/, /🤖 Model & effort/, /🔎 What uses your tokens/])
-      expect(await ui.find({ type: 'Text', text: label })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: say(surface, label) })).toBeDefined()
     // Collapsing again; the choice is remembered across sessions.
     expect(w.store.get('cockpit.expanded')).toBe(true)
     await ui.press({ key: 'cockpit-usage' })
@@ -173,7 +185,8 @@ for (const surface of SURFACES) {
     expect(w.toasts.some(t => /Budget at 90%.*Compact now/.test(t))).toBe(true)
     const ui = await band($, surface)
     const btn = (await ui.find({ key: 'cockpit-usage' })) as unknown as { props: { label: string } } | undefined
-    expect(btn?.props.label).toMatch(/😡$/)
+    if (surface === 'terminal') expect(btn?.props.label).toMatch(/😡$/)
+    else expect((await crabs(ui))[0]).toBe('usage red')
     await ui.press({ key: 'cockpit-usage' })
     expect(await ui.find({ key: 'cockpit-compact' })).toBeDefined()
     expect(await ui.find({ key: 'cockpit-handoff' })).toBeDefined()
@@ -356,7 +369,7 @@ for (const surface of SURFACES) {
     const ui = await band($, surface)
     await ui.press({ key: 'cockpit-usage' })
     for (const re of [/📜 System prompt/, /🔧 System tools/, /🔌 MCP tools/, /🧩 Skills/, /🗂️ Memory files/, /💬 Messages/, /Top tools, skills and subagents/, /🔧 Write/])
-      expect(await ui.find({ type: 'Text', text: re })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: say(surface, re) })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /Free space/ })).toBeUndefined()
     await ui.unmount()
   })
@@ -366,13 +379,13 @@ for (const surface of SURFACES) {
     await $.command.run({ command: 'usage-panel', args: 'open' } as never)
     const ui = await $.ui.mount({ plugin: PLUGIN, surface, ...PANE } as never)
     expect(await ui.find({ key: 'refresh' })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /⏱️ 5-hour limit/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /🔎 What uses your tokens/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: say(surface, /⏱️ 5-hour limit/) })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: say(surface, /🔎 What uses your tokens/) })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^Estimate:/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /🔌 github/ })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: say(surface, /🔌 github/) })).toBeUndefined()
     await ui.press({ key: 'show-all' })
-    expect(await ui.find({ type: 'Text', text: /🔌 github/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /🗂️ repo\/CLAUDE\.md/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: say(surface, /🔌 github/) })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: say(surface, /🗂️ repo\/CLAUDE\.md/) })).toBeDefined()
     if (surface === 'desktop') expect((await ui.findAll({ type: 'Svg' })).length).toBeGreaterThan(8)
     await ui.unmount()
   })
@@ -391,4 +404,52 @@ test('keep-alive on: pings with a fork before the TTL, at most N times', { optio
   // 1h TTL on a subscription (limits are reported): pings start 3 min before the end.
   for (let i = 0; i < 6 * 12; i++) await clock.advance((60 * 60_000) / 12)
   expect(w.forks).toBe(2)
+})
+
+test('desktop: each line picks its crab kind and the tone of its own bar', async ($, on) => {
+  const { w } = await start($, on, 30, { usage: BREAKDOWN })
+  await $.turn.complete({ turnId: 't', answer: 'a', durationMs: 1, isAborted: false, reason: 'answer' } as never)
+  await submit($, 'hi')
+  w.five = 75
+  w.usage = e => {
+    const b = BREAKDOWN(e) as ReturnType<typeof usageAt>
+    return { ...b, context: { ...b.context, percent: 60, tokens: 600_000 }, rateLimits: usageAt(60, 75).rateLimits }
+  }
+  await measure($, w, 60, 75)
+  const ui = await band($, 'desktop')
+  await ui.press({ key: 'cockpit-usage' })
+  const got = await crabs(ui)
+  // Worst first (the header), then the lines in order: context yellow (60%), 5h orange (75%),
+  // 7d green, cost green, cache green, model red (Opus at high for "hi").
+  expect(got.slice(0, 7)).toEqual(['usage red', 'context yellow', 'five_hour orange', 'seven_day green', 'cost green', 'cache green', 'model red'])
+  expect(got).toContain('breakdown green')
+  expect(got).toContain('system_prompt green')
+  expect(got).toContain('mcp green')
+  expect(got).toContain('memory green')
+  expect(got).toContain('messages green')
+  expect(got).toContain('tools green')
+  await ui.unmount()
+})
+
+test('desktop: a cold cache shows the sleeping crab', async ($, on) => {
+  const { clock } = await start($, on)
+  await $.turn.complete({ turnId: 't', answer: 'a', durationMs: 1, isAborted: false, reason: 'answer' } as never)
+  await clock.advance(61 * 60_000)
+  const ui = await band($, 'desktop')
+  await ui.press({ key: 'cockpit-usage' })
+  expect(await crabs(ui)).toContain('cache cold')
+  await ui.unmount()
+})
+
+test('desktop: at the critical level the guard buttons carry the compact and handoff crabs', async ($, on) => {
+  const { w } = await start($, on)
+  await measure($, w, 92)
+  const ui = await band($, 'desktop')
+  await ui.press({ key: 'cockpit-usage' })
+  const got = await crabs(ui)
+  expect(got).toContain('compact red')
+  expect(got).toContain('handoff orange')
+  expect(got).toContain('context red')
+  expect((await ui.find({ key: 'cockpit-compact' }) as unknown as { props: { label: string } }).props.label).toBe('Compact now')
+  await ui.unmount()
 })

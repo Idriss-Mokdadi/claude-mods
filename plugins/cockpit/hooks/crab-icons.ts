@@ -1,11 +1,12 @@
-// Pixel crab icons: one crab per line of the cockpit, its pose set by the line's
-// tone and a prop that says what the line is. The crab body and the stamp helper
-// come from JohnnyVizz/claude-kit savvy-progress (MIT, see THIRD_PARTY_NOTICES.md);
-// the poses and props are cockpit's own.
+// Pixel crab icons: one crab per line of the cockpit, its mood set by the line's
+// tone (pose AND body colour) and a prop that says what the line is. The crab is
+// the savvy-progress crab of JohnnyVizz/claude-kit (MIT, see
+// THIRD_PARTY_NOTICES.md), redrawn chunkier so it reads at 26 px; the moods and
+// props are cockpit's own.
 //
-// Grid: 40 by 30 units, crisp edges. The crab stands in x 0-27 (the savvy-progress
-// grid), the prop in x 27-39. Colours that must read on both themes (outlines,
-// paper) are classes, switched under prefers-color-scheme.
+// Grid: 34 by 24 units, crisp edges, about one pixel per unit at band size. The
+// crab stands in x 0-21, the prop in x 22-33. Every prop gets a 1-unit dark
+// outline, worked out from its pixels, so it pops on light and dark themes.
 
 import type { Tone } from '../types'
 
@@ -35,408 +36,442 @@ export const ICON_KINDS: readonly IconKind[] = [
 export const TONES: readonly Tone[] = ['green', 'yellow', 'orange', 'red']
 
 export type IconOptions = {
-  // Height in px; the width follows the 4:3 grid.
+  // Height in px (26 in the band, 32 in the panel); the width follows the grid.
   size?: number
   // context: how full the backpack is, 0-100; by tone when absent.
   pct?: number
-  // cache: expired, the crab sleeps in its ice cube.
+  // cache: expired, the crab sleeps in a frosted cube.
   cold?: boolean
   // Face left (right-to-left layouts).
   mirror?: boolean
 }
 
-const CLAY = '#D97757'
-const ANGRY = '#E5484D'
+const GRID_W = 34
+const GRID_H = 24
+
+// Body colour per mood: calm clay, light clay, vivid orange, red.
+export const BODY: Record<Tone, string> = { green: '#D97757', yellow: '#EBA57E', orange: '#F07418', red: '#DC3B3F' }
 const INK = '#1F1E1D'
-// Adaptive colours: `O` outline, `P` paper.
-const O = 'O'
+const OUTLINE = '#26241F'
+// Adaptive paper (light inside props).
 const P = 'P'
 
+type Cell = { x: number; y: number; c: string; cls: string }
 type Fill = (x: number, y: number, w: number, h: number, c: string, cls?: string) => void
 
-const stamp = (f: Fill, x: number, y: number, rows: readonly string[], map: Record<string, string>, cls?: string): void =>
+const stamper = (f: Fill) => (x: number, y: number, rows: readonly string[], map: Record<string, string>, cls?: string): void =>
   rows.forEach((row, dy) => [...row].forEach((ch, dx) => map[ch] && f(x + dx, y + dy, 1, 1, map[ch] ?? '', cls)))
 
 // ---------------------------------------------------------------------------
-// The crab in four moods.
+// The crab: body x 4-17, y 8-16; legs to y 19; arms 3 wide at the sides.
 
-type Pose = { body: string; eyes: 'open' | 'shut' }
-
-function crabPose(f: Fill, tone: Tone, pose: Pose, armsDown = false): void {
-  const body = pose.body
-  f(7, 10, 16, 12, body)
-  f(7, 22, 2, 4, body, 'la')
-  f(17, 22, 2, 4, body, 'la')
-  f(11, 22, 2, 4, body, 'lb')
-  f(21, 22, 2, 4, body, 'lb')
-  if (pose.eyes === 'open') {
-    f(9, 12, 2, 2, INK)
-    f(19, 12, 2, 2, INK)
+function crab(f: Fill, tone: Tone, opts: { asleep: boolean; armsDown: boolean; inCube: boolean }): void {
+  const stamp = stamper(f)
+  const b = BODY[tone]
+  f(4, 8, 14, 9, b)
+  f(5, 17, 2, 3, b, 'la')
+  f(12, 17, 2, 3, b, 'la')
+  f(8, 17, 2, 3, b, 'lb')
+  f(15, 17, 2, 3, b, 'lb')
+  // Eyes: 2 by 3, or shut.
+  if (opts.asleep) {
+    f(6, 11, 3, 1, INK)
+    f(13, 11, 3, 1, INK)
+  } else if (tone === 'red') {
+    f(6, 11, 2, 2, INK)
+    f(14, 11, 2, 2, INK)
+    // Angry brows, slanting down to the middle.
+    f(5, 9, 2, 1, INK)
+    f(7, 10, 1, 1, INK)
+    f(15, 9, 2, 1, INK)
+    f(14, 10, 1, 1, INK)
   } else {
-    f(9, 13, 2, 1, INK)
-    f(19, 13, 2, 1, INK)
+    f(6, 10, 2, 3, INK)
+    f(14, 10, 2, 3, INK)
   }
-  if (tone === 'green') {
-    // Happy: claws up, a smile, a tiny heart.
-    if (armsDown) {
-      f(3, 14, 4, 4, body, 'arm')
-      f(23, 14, 4, 4, body, 'arm')
-    } else {
-      // Raised out to the sides, elbows bent, clear of the head.
-      f(1, 5, 4, 4, body, 'arm')
-      f(3, 9, 2, 2, body, 'arm')
-      f(5, 11, 2, 3, body, 'arm')
-      f(25, 5, 4, 4, body, 'arm')
-      f(25, 9, 2, 2, body, 'arm')
-      f(23, 11, 2, 3, body, 'arm')
-    }
-    f(12, 17, 1, 1, INK)
-    f(13, 18, 4, 1, INK)
-    f(17, 17, 1, 1, INK)
-    stamp(f, 1, 2, ['h.h', 'hhh', '.h.'], { h: '#E5484D' }, 'fx')
+  if (tone === 'orange' && !opts.asleep) {
+    // Worried brows, raised in the middle.
+    f(5, 9, 1, 1, INK)
+    f(16, 9, 1, 1, INK)
+  }
+  // Mouths.
+  if (opts.asleep) f(9, 14, 4, 1, INK)
+  else if (tone === 'green') stamp(8, 13, ['x....x', '.xxxx.'], { x: INK })
+  else if (tone === 'yellow') f(8, 14, 6, 1, INK)
+  else if (tone === 'orange') stamp(8, 13, ['.x.x.x', 'x.x.x.'], { x: INK })
+  else stamp(8, 13, ['.xxxx.', 'x....x'], { x: INK })
+
+  const lowArms = () => {
+    f(1, 11, 3, 3, b, 'arm')
+    f(18, 11, 3, 3, b, 'arm2')
+  }
+  if (opts.armsDown || opts.inCube) lowArms()
+  else if (tone === 'green') {
+    // Claws up, out to the sides.
+    f(1, 3, 3, 3, b, 'arm')
+    f(2, 6, 2, 4, b, 'arm')
+    f(18, 3, 3, 3, b, 'arm2')
+    f(18, 6, 2, 4, b, 'arm2')
   } else if (tone === 'yellow') {
-    // Neutral: still, one claw scratching its head.
-    // Elbow out at the side, claw resting on the head's corner.
-    f(3, 9, 2, 5, body, 'arm')
-    f(5, 13, 2, 2, body, 'arm')
-    f(4, 6, 5, 3, body, 'arm')
-    f(23, 14, 4, 4, body, 'arm')
-    f(12, 18, 6, 1, INK)
-    stamp(f, 3, 3, ['o.o', '.o.'], { o: O }, 'fx')
+    // One claw scratching its head.
+    f(1, 8, 2, 4, b, 'arm')
+    f(2, 5, 4, 3, b, 'arm')
+    f(18, 11, 3, 3, b, 'arm2')
   } else if (tone === 'orange') {
-    // Worried: slanted brows, wobbly mouth, a sweat drop, shaking claws.
-    f(3, 14, 4, 4, body, 'arm')
-    f(23, 14, 4, 4, body, 'arm')
-    f(8, 10, 1, 1, INK)
-    f(9, 9, 2, 1, INK)
-    f(21, 10, 1, 1, INK)
-    f(19, 9, 2, 1, INK)
-    stamp(f, 12, 17, ['.x.x.x', 'x.x.x.'], { x: INK })
-    stamp(f, 3, 5, ['.b', 'bb', 'bb'], { b: '#5BB4F0' }, 'fx')
+    lowArms()
   } else {
-    // Angry: red, frowning brows, steam puffs, snapping claws.
-    f(3, 12, 4, 4, body, 'arm')
-    f(3, 11, 1, 1, body, 'arm')
-    f(6, 11, 1, 1, body, 'arm')
-    f(23, 12, 4, 4, body, 'arm2')
-    f(23, 11, 1, 1, body, 'arm2')
-    f(26, 11, 1, 1, body, 'arm2')
-    f(8, 10, 2, 1, INK)
-    f(10, 11, 1, 1, INK)
-    f(20, 10, 2, 1, INK)
-    f(19, 11, 1, 1, INK)
-    f(12, 17, 6, 1, INK)
-    f(12, 18, 1, 1, INK)
-    f(17, 18, 1, 1, INK)
-    stamp(f, 4, 3, ['.ss', 'ss.', '.ss'], { s: '#B9BCC2' }, 'fx')
-    stamp(f, 21, 3, ['ss.', '.ss', 'ss.'], { s: '#B9BCC2' }, 'fx2')
+    // Snapping pincers, raised.
+    stamp(1, 2, ['x.x', 'xxx', '.x.', '.x.', '.xx', '..x'], { x: b }, 'arm')
+    stamp(18, 2, ['x.x', 'xxx', '.x.', '.x.', 'xx.', 'x..'], { x: b }, 'arm2')
+  }
+
+  // The accent that names the mood by colour.
+  if (opts.asleep) return
+  if (tone === 'green') stamp(9, 2, ['.g.', 'ggg', '.g.'], { g: '#2FA866' }, 'fx')
+  else if (tone === 'yellow') stamp(8, 3, ['y...y', '.y.y.'], { y: '#F2B705' }, 'fx')
+  else if (tone === 'orange') stamp(15, 3, ['.b', 'bb', 'bb'], { b: '#3D9BF0' }, 'fx')
+  else {
+    stamp(5, 3, ['.s', 's.', '.s'], { s: '#8E929A' }, 'fx')
+    stamp(15, 3, ['s.', '.s', 's.'], { s: '#8E929A' }, 'fx2')
   }
 }
 
 // ---------------------------------------------------------------------------
-// Props. Each draws in x 27-39 unless it says otherwise.
+// Props: drawn with `p` (outlined) in x 23-32, or with `f` for parts that sit on
+// the crab (antenna, pockets, ice cube).
 
-const TONE_FILL: Record<Tone, string> = { green: '#3B9C5F', yellow: '#D9B21B', orange: '#E8833A', red: '#E5484D' }
+const TONE_FILL: Record<Tone, string> = { green: '#2FA866', yellow: '#F2B705', orange: '#F07418', red: '#DC3B3F' }
 const TONE_LEVEL: Record<Tone, number> = { green: 30, yellow: 60, orange: 80, red: 100 }
 
-type Prop = (f: Fill, tone: Tone, o: IconOptions) => void
+type PropFn = (p: ReturnType<typeof stamper>, f: Fill, tone: Tone, o: IconOptions) => void
 
-const PROPS: Record<IconKind, Prop> = {
-  // 📊 A mini bar chart.
-  usage: f =>
-    stamp(f, 28, 10, [
-      '.......rr.',
-      '.......rr.',
-      '....bb.rr.',
-      '....bb.rr.',
-      '.gg.bb.rr.',
-      '.gg.bb.rr.',
-      '.gg.bb.rr.',
-      '.gg.bb.rr.',
-      'oooooooooo',
-    ], { g: '#3B9C5F', b: '#378ADD', r: '#E8833A', o: O }),
+const PROPS: Record<IconKind, PropFn> = {
+  usage: p =>
+    p(24, 9, [
+      '......rr',
+      '......rr',
+      '...bb.rr',
+      '...bb.rr',
+      'gg.bb.rr',
+      'gg.bb.rr',
+      'gg.bb.rr',
+      'kkkkkkkk',
+    ], { g: '#2FA866', b: '#3D8BEB', r: '#F07418', k: '#5A5A5A' }),
 
-  // 🧠 A backpack that fills with the context.
-  context: (f, tone, o) => {
-    stamp(f, 28, 9, [
-      '..ooooo..',
-      '.o.....o.',
-      'ooooooooo',
-      'oPPPPPPPo',
-      'oPPPPPPPo',
-      'oPPPPPPPo',
-      'oPPPPPPPo',
-      'oPPPPPPPo',
-      'oPPPPPPPo',
-      'oPPPPPPPo',
-      'ooooooooo',
-    ], { o: O, P })
-    const pct = Math.max(0, Math.min(100, o.pct ?? TONE_LEVEL[tone]))
-    const rows = Math.round((7 * pct) / 100)
-    if (rows > 0) f(29, 12 + 7 - rows, 7, rows, TONE_FILL[tone])
+  context: (p, _f, tone, o) => {
+    const level = Math.max(0, Math.min(100, o.pct ?? TONE_LEVEL[tone]))
+    const filled = Math.round((7 * level) / 100)
+    const rows = ['..kkkk..', '..k..k..', 'bbbbbbbb']
+    for (let i = 0; i < 7; i++) rows.push(i >= 7 - filled ? 'bffffffb' : 'bPPPPPPb')
+    rows.push('bbbbbbbb')
+    p(24, 7, rows, { k: '#5A3519', b: '#8A5A1E', P, f: TONE_FILL[tone] })
   },
 
-  // ⏱️ A stopwatch.
-  five_hour: f =>
-    stamp(f, 28, 9, [
-      '...ooo...',
-      '....o....',
-      '..ooooo..',
-      '.oPPPPPo.',
-      'oPPPrPPPo',
-      'oPPPrPPPo',
-      'oPPPrrPPo',
-      'oPPPPPPPo',
-      '.oPPPPPo.',
-      '..ooooo..',
-    ], { o: O, P, r: '#E5484D' }),
+  five_hour: p =>
+    p(24, 6, [
+      '...kk...',
+      '..kkkk..',
+      '.kwwwwk.',
+      'kwwwrwwk',
+      'kwwwrwwk',
+      'kwwwrrwk',
+      'kwwwwwwk',
+      '.kwwwwk.',
+      '..kkkk..',
+    ], { k: '#6B6B6B', w: '#FFFFFF', r: '#DC3B3F' }),
 
-  // 📅 A calendar page.
-  seven_day: f =>
-    stamp(f, 28, 9, [
-      '.o.....o.',
-      'ooooooooo',
-      'orrrrrrro',
-      'orrrrrrro',
-      'oPPPPPPPo',
-      'oPoPoPoPo',
-      'oPPPPPPPo',
-      'oPoPoPoPo',
-      'oPPPPPPPo',
-      'ooooooooo',
-    ], { o: O, P, r: '#E5484D' }),
+  seven_day: p =>
+    p(24, 6, [
+      '.k....k.',
+      'rrrrrrrr',
+      'rrrrrrrr',
+      'wwwwwwww',
+      'wkwkwkww',
+      'wwwwwwww',
+      'wkwkwkww',
+      'wwwwwwww',
+    ], { k: '#4A4A4A', r: '#DC3B3F', w: '#FFFFFF' }),
 
-  // 💵 A coin; red: pockets turned out, nothing left.
-  cost: (f, tone) => {
+  cost: (p, f, tone) => {
     if (tone === 'red') {
-      // Pockets pulled out of both sides, empty; a little dust falls out.
-      stamp(f, 1, 17, ['oooooo', 'oPPPPo', 'oPPPPo', '.oPPo.', '..oo..'], { o: O, P })
-      stamp(f, 23, 17, ['oooooo', 'oPPPPo', 'oPPPPo', '.oPPo.', '..oo..'], { o: O, P })
-      stamp(f, 30, 19, ['o...', '..o.', '....', 'o..o', '....', '.o..'], { o: '#B9BCC2' }, 'fx2')
+      // Pockets pulled out, nothing in them; the prop is an empty, open purse.
+      const s = stamper(f)
+      s(3, 15, ['wwww', 'wwww', '.ww.'], { w: '#FFFFFF' })
+      s(15, 15, ['wwww', 'wwww', '.ww.'], { w: '#FFFFFF' })
+      p(24, 9, [
+        'b......b',
+        'bb....bb',
+        'bbbbbbbb',
+        'bPPPPPPb',
+        'bPPPPPPb',
+        'bbbbbbbb',
+      ], { b: '#8A5A1E', P })
       return
     }
-    stamp(f, 28, 10, [
-      '..ooooo..',
-      '.oyyyyyo.',
-      'oyyykkyyo',
-      'oyykyyyyo',
-      'oyyykkyyo',
-      'oyyyyykyo',
-      'oyykkyyyo',
-      '.oyyyyyo.',
-      '..ooooo..',
-    ], { y: '#F5C542', k: '#8A5A1E', o: '#B8860B' })
+    p(24, 7, [
+      '..yyyy..',
+      '.yyyyyy.',
+      'yyykkyyy',
+      'yykyyyyy',
+      'yyykkyyy',
+      'yyyyykyy',
+      'yykkyyyy',
+      '.yyyyyy.',
+      '..yyyy..',
+    ], { y: '#F5C542', k: '#8A5A1E' })
   },
 
-  // 🧊 Inside an ice cube; cold: asleep, "zz".
-  cache: (f, _tone, o) => {
-    f(1, 5, 28, 23, 'rgba(150,205,245,.35)', 'ice')
-    f(1, 5, 28, 1, '#9FD3F5', 'ice')
-    f(1, 27, 28, 1, '#9FD3F5', 'ice')
-    f(1, 5, 1, 23, '#9FD3F5', 'ice')
-    f(28, 5, 1, 23, '#9FD3F5', 'ice')
-    f(3, 7, 3, 1, '#FFFFFF', 'ice')
-    f(3, 8, 1, 3, '#FFFFFF', 'ice')
-    if (o.cold) stamp(f, 29, 3, ['......ooo', '.......o.', 'ooooo.ooo', '...o.....', '..o......', '.o.......', 'ooooo....'], { o: O }, 'zz')
-    else stamp(f, 31, 12, ['.b.b.', 'b.b.b', '.bbb.', 'b.b.b', '.b.b.'], { b: '#5BB4F0' })
+  cache: (p, f, _tone, o) => {
+    // A clear ice cube around the crab: outline and highlight, no fill; cold
+    // adds a frosty tint and "zz".
+    if (o.cold) f(1, 2, 21, 19, 'rgba(160,215,255,.28)', 'frost')
+    const edge = '#5DB7F2'
+    f(0, 1, 23, 1, edge, 'ice')
+    f(0, 21, 23, 1, edge, 'ice')
+    f(0, 1, 1, 21, edge, 'ice')
+    f(22, 1, 1, 21, edge, 'ice')
+    f(2, 3, 3, 1, '#FFFFFF', 'shine')
+    f(2, 4, 1, 2, '#FFFFFF', 'shine')
+    f(19, 18, 2, 1, '#BFE4FB', 'shine')
+    if (o.cold) stamper(f)(24, 3, ['zzzz....', '..z.....', '.z...zzz', 'zzzz..z.', '.....zzz'], { z: '#3D9BF0' }, 'zz')
+    else p(25, 8, ['...b...', '..bbb..', '.bbwbb.', 'bbwwwbb', '.bbwbb.', '..bbb..', '...b...'], { b: '#5DB7F2', w: '#DDF1FF' })
   },
 
-  // 🤖 A gauge; red: the wrong model, a confused "?".
-  model: (f, tone) => {
-    stamp(f, 28, 14, [
-      '...ooooo...',
-      '..oggyyro..',
-      '.ogg...rro.',
-      'ogg.....rro',
-      'ooooooooooo',
-    ], { o: O, g: '#3B9C5F', y: '#D9B21B', r: '#E5484D' })
+  model: (p, _f, tone) => {
+    // A dial with a white face; the needle points at the tone.
     const needle: Record<Tone, readonly [number, number][]> = {
-      green: [[32, 17], [31, 16]],
-      yellow: [[33, 17], [33, 16]],
-      orange: [[34, 17], [35, 16]],
-      red: [[34, 17], [35, 17]],
+      green: [[26, 17], [25, 16], [24, 15]],
+      yellow: [[27, 16], [27, 15], [27, 14]],
+      orange: [[28, 16], [29, 15], [30, 14]],
+      red: [[28, 17], [29, 17], [30, 17]],
     }
-    for (const [x, y] of needle[tone]) f(x, y, 1, 1, INK)
-    f(33, 17, 1, 1, INK)
-    if (tone === 'red') stamp(f, 29, 3, ['.ooo.', 'o...o', '...o.', '..o..', '.....', '..o..'], { o: '#F5C542' }, 'q')
+    const rows = ['..ggyyrr..', '.gwwwwwwr.', 'gwwwwwwwwr', 'gwwwwwwwwr', 'gwwwwwwwwr', 'kkkkkkkkkk']
+    p(23, 13, rows, { g: '#2FA866', y: '#F2B705', r: '#DC3B3F', k: '#4A4A4A', w: '#FFFFFF' })
+    for (const [x, y] of needle[tone]) p(x, y, ['k'], { k: INK })
+    p(27, 17, ['k'], { k: INK })
+    if (tone === 'red') p(25, 2, ['.yyy.', 'y...y', '...y.', '..y..', '.....', '..y..'], { y: '#FFD23F' }, 'q')
   },
 
-  // 🔎 A detective's magnifier.
-  breakdown: f =>
-    stamp(f, 28, 8, [
-      '..oooo....',
-      '.occcco...',
-      'occwccco..',
-      'occcccco..',
-      'occcccco..',
-      '.occcco...',
-      '..oooo....',
+  breakdown: p =>
+    p(23, 6, [
+      '..kkkk....',
+      '.kccccK...',
+      'kcwcccck..',
+      'kcccccck..',
+      'kcccccck..',
+      '.kcccck...',
+      '..kkkkb...',
       '......bb..',
       '.......bb.',
       '........bb',
-    ], { o: O, c: 'rgba(150,205,245,.6)', w: '#FFFFFF', b: '#8A5A1E' }),
+    ], { k: '#4A4A4A', K: '#4A4A4A', c: '#A9DBFA', w: '#FFFFFF', b: '#8A5A1E' }),
 
-  // 📜 A scroll.
-  system_prompt: f =>
-    stamp(f, 28, 9, [
-      'pppppppppp',
-      '.wwwwwwww.',
-      '.wkkkkkkw.',
-      '.wwwwwwww.',
-      '.wkkkkwww.',
-      '.wwwwwwww.',
-      '.wkkkkkkw.',
-      '.wwwwwwww.',
-      'pppppppppp',
-    ], { w: '#F3E2B8', k: '#8A5A1E', p: '#B8894A' }),
+  system_prompt: p =>
+    p(24, 7, [
+      'pppppppp',
+      '.wwwwww.',
+      '.wkkkkw.',
+      '.wwwwww.',
+      '.wkkkww.',
+      '.wwwwww.',
+      '.wkkkkw.',
+      'pppppppp',
+    ], { w: '#F6E7C1', k: '#8A5A1E', p: '#B8894A' }),
 
-  // 🔧 A wrench.
-  tools: f =>
-    stamp(f, 28, 8, [
-      'gg.gg.....',
-      'g...g.....',
-      'gg.gg.....',
-      '.ggg......',
-      '...gg.....',
-      '....gg....',
-      '.....gg...',
-      '......gg..',
-      '.......gg.',
-      '........gg',
-    ], { g: '#8E929A' }),
+  tools: p =>
+    p(23, 6, [
+      'gg.gg....',
+      'g...g....',
+      'gg.gg....',
+      '.ggg.....',
+      '..ggg....',
+      '...ggg...',
+      '....ggg..',
+      '.....ggg.',
+      '......ggg',
+      '.......gg',
+    ], { g: '#A3A7AE' }),
 
-  // 🔌 An antenna on its head and a plug in its claw.
-  mcp: f => {
-    f(15, 3, 1, 7, '#8E929A')
-    f(14, 1, 3, 2, '#E5484D', 'fx')
-    stamp(f, 30, 9, [
-      '.m.m.',
-      '.m.m.',
-      'ooooo',
-      'ooooo',
-      'ooooo',
-      '.ooo.',
-      '..o..',
-      '..o..',
-      '..ooo',
-    ], { o: O, m: '#B9BCC2' })
+  mcp: (p, f) => {
+    f(11, 3, 1, 5, '#8E929A')
+    f(10, 1, 3, 2, '#DC3B3F', 'fx2')
+    p(25, 6, [
+      '.m..m.',
+      '.m..m.',
+      'kkkkkk',
+      'kkkkkk',
+      'kkkkkk',
+      '.kkkk.',
+      '..kk..',
+      '..kk..',
+      '..kkkk',
+    ], { k: '#A3A7AE', m: '#5A5A5A' })
   },
 
-  // 🧩 A puzzle piece.
-  skills: f =>
-    stamp(f, 28, 8, [
+  skills: p =>
+    p(23, 6, [
       '...pp.....',
       '..pppp....',
-      'oooooooo..',
       'pppppppp..',
-      'ppppppppp.',
+      'pppppppp..',
       'pppppppppp',
       'pppppppppp',
-      'ppppppppp.',
+      'pppppppp..',
       'pppppppp..',
       'ppp..ppp..',
       'pp....pp..',
-    ], { p: '#1D9E75', o: '#178A65' }),
+    ], { p: '#22B07D' }),
 
-  // 🗂️ A notebook.
-  memory: f =>
-    stamp(f, 28, 8, [
+  memory: p =>
+    p(24, 6, [
       's.s.s.s.',
       'bbbbbbbb',
-      'bPPPPPPb',
-      'bPkkkkPb',
-      'bPPPPPPb',
-      'bPkkkPPb',
-      'bPPPPPPb',
-      'bPkkkkPb',
-      'bPPPPPPb',
+      'bwwwwwwb',
+      'bwkkkkwb',
+      'bwwwwwwb',
+      'bwkkkwwb',
+      'bwwwwwwb',
+      'bwkkkkwb',
       'bbbbbbbb',
-    ], { b: '#378ADD', P, k: '#8E929A', s: O }),
+    ], { b: '#3D8BEB', w: '#FFFFFF', k: '#9A9A9A', s: '#C9CCD2' }),
 
-  // 💬 A speech bubble.
-  messages: f =>
-    stamp(f, 27, 2, [
-      '.ooooooooo.',
-      'oPPPPPPPPPo',
-      'oPoPPoPPoPo',
-      'oPPPPPPPPPo',
-      '.ooooPPooo.',
-      '.....oo....',
-      '....o......',
-    ], { o: O, P }),
+  messages: p =>
+    p(23, 2, [
+      'wwwwwwwwww',
+      'wwwwwwwwww',
+      'wkwwkwwkww',
+      'wwwwwwwwww',
+      'wwwwwwwwww',
+      '..ww......',
+      '.w........',
+    ], { w: '#FFFFFF', k: INK }),
 
-  // 🧳 A suitcase.
-  handoff: f =>
-    stamp(f, 28, 12, [
-      '...hhh...',
-      '..h...h..',
-      'bbbbbbbbb',
-      'bsbbbbbsb',
-      'bbbbbbbbb',
-      'bsbbbbbsb',
-      'bbbbbbbbb',
-      'bbbbbbbbb',
-    ], { h: '#5A3519', b: '#9A6A3A', s: '#E0B040' }),
+  handoff: p =>
+    p(23, 9, [
+      '...hhhh...',
+      '...h..h...',
+      'bbbbbbbbbb',
+      'bsbbbbbbsb',
+      'bbbbbbbbbb',
+      'bbbbbbbbbb',
+      'bsbbbbbbsb',
+      'bbbbbbbbbb',
+    ], { h: '#5A3519', b: '#A8743E', s: '#F5C542' }),
 
-  // 🗜️ Squashing a box flat.
-  compact: f =>
-    stamp(f, 28, 12, [
-      '....oo....',
-      '....oo....',
-      '..oooooo..',
-      '...oooo...',
-      '....oo....',
-      '..........',
-      'kkkkkkkkkk',
-      'kcccccccck',
-      'kkkkkkkkkk',
-    ], { o: O, k: '#8A5A1E', c: '#D9A66A' }),
+  compact: p =>
+    // Two arrows pressing in from above and below, a box squashed flat between.
+    p(24, 3, [
+      '...aa...',
+      '...aa...',
+      '.aaaaaa.',
+      '..aaaa..',
+      '...aa...',
+      'bbbbbbbb',
+      'bccccccb',
+      'bbbbbbbb',
+      '...aa...',
+      '..aaaa..',
+      '.aaaaaa.',
+      '...aa...',
+      '...aa...',
+    ], { a: '#3D8BEB', b: '#8A5A1E', c: '#E0AE72' }),
 }
 
-// Props held low keep the claws down even when happy.
-const ARMS_DOWN: ReadonlySet<IconKind> = new Set(['compact', 'handoff', 'cache'])
+const ARMS_DOWN: ReadonlySet<IconKind> = new Set(['compact', 'handoff'])
 
 // ---------------------------------------------------------------------------
 
 export const ICON_CSS = `<style>
-.ci .co{fill:#3A3A3C}.ci .cp{fill:#FBFAF6}
-@media (prefers-color-scheme: dark){.ci .co{fill:#D4D4D0}.ci .cp{fill:#EDEBE4}}
-.ci-green .fx{animation:ci-blink 1.2s steps(1) infinite}
-.ci-orange .arm{animation:ci-shake .2s steps(1) infinite}.ci-orange .fx{animation:ci-drip 1s linear infinite}
+.ci .cp{fill:#FFFDF8}@media (prefers-color-scheme: dark){.ci .cp{fill:#F4F1E8}}
+.ci-green .fx{animation:ci-blink 1.4s steps(1) infinite}
+.ci-yellow .fx{animation:ci-blink 2s steps(1) infinite}
+.ci-orange .arm,.ci-orange .arm2{animation:ci-shake .2s steps(1) infinite}.ci-orange .fx{animation:ci-drip 1s linear infinite}
 .ci-red .arm{animation:ci-snap .3s steps(1) infinite}.ci-red .arm2{animation:ci-snap .3s steps(1) infinite -.15s}
 .ci-red .fx{animation:ci-blink .5s steps(1) infinite}.ci-red .fx2{animation:ci-blink .5s steps(1) infinite -.25s}
 .ci .zz{animation:ci-blink 2s steps(1) infinite}
-@keyframes ci-blink{50%{opacity:.2}}@keyframes ci-shake{50%{transform:translateX(1px)}}
-@keyframes ci-snap{50%{transform:translateY(-1px)}}@keyframes ci-drip{0%{transform:translateY(0)}100%{transform:translateY(3px);opacity:0}}
+@keyframes ci-blink{50%{opacity:.25}}@keyframes ci-shake{50%{transform:translateX(1px)}}
+@keyframes ci-snap{50%{transform:translateY(-1px)}}@keyframes ci-drip{0%{transform:translateY(0)}100%{transform:translateY(2px);opacity:.2}}
 @media (prefers-reduced-motion: reduce){.ci *{animation:none!important}}
 </style>`
 
-const rectOf = (x: number, y: number, w: number, h: number, c: string): string => {
-  const paint = c === O ? 'class="co"' : c === P ? 'class="cp"' : `fill="${c}"`
-  return `<rect x="${x}" y="${y}" width="${w}" height="${h}" ${paint}/>`
+const rectOf = (x: number, y: number, w: number, h: number, c: string): string =>
+  `<rect x="${x}" y="${y}" width="${w}" height="${h}" ${c === P ? 'class="cp"' : `fill="${c}"`}/>`
+
+// Single pixels merged into horizontal runs of one colour: a much smaller SVG.
+const runs = (px: readonly { x: number; y: number; c: string }[]): string => {
+  const last = new Map<string, { x: number; y: number; c: string }>()
+  for (const p of px) last.set(`${p.x},${p.y}`, p)
+  const sorted = [...last.values()].sort((a, b) => a.y - b.y || a.x - b.x)
+  const out: string[] = []
+  let i = 0
+  while (i < sorted.length) {
+    const a = sorted[i] as { x: number; y: number; c: string }
+    let w = 1
+    while (i + w < sorted.length) {
+      const b = sorted[i + w] as { x: number; y: number; c: string }
+      if (b.y !== a.y || b.x !== a.x + w || b.c !== a.c) break
+      w++
+    }
+    out.push(rectOf(a.x, a.y, w, 1, a.c))
+    i += w
+  }
+  return out.join('')
 }
 
 // The icon as one SVG: the crab in the line's mood, holding the line's prop.
 export function crabIcon(kind: IconKind, tone: Tone, opts: IconOptions = {}): string {
-  const size = opts.size ?? 20
+  const size = opts.size ?? 26
   const groups = new Map<string, string[]>()
   const f: Fill = (x, y, w, h, c, cls = 'bd') => {
     if (!groups.has(cls)) groups.set(cls, [])
     groups.get(cls)?.push(rectOf(x, y, w, h, c))
   }
+  // Prop cells, kept to outline them.
+  const cells: Cell[] = []
+  const pf: Fill = (x, y, w, h, c, cls = 'pr') => {
+    for (let dx = 0; dx < w; dx++) for (let dy = 0; dy < h; dy++) cells.push({ x: x + dx, y: y + dy, c, cls })
+  }
   const asleep = kind === 'cache' && opts.cold === true
-  crabPose(f, tone, { body: tone === 'red' ? ANGRY : CLAY, eyes: asleep ? 'shut' : 'open' }, ARMS_DOWN.has(kind))
-  PROPS[kind](f, tone, opts)
-  // Ice goes over the crab; everything else under the effects.
-  const order = ['bd', 'la', 'lb', 'arm', 'arm2', 'ice', 'fx', 'fx2', 'zz']
-  const body = [...order, ...[...groups.keys()].filter(k => !order.includes(k))]
+  crab(f, tone, { asleep, armsDown: ARMS_DOWN.has(kind), inCube: kind === 'cache' })
+  PROPS[kind](stamper(pf), f, tone, opts)
+
+  // A 1-unit dark outline around the prop's pixels.
+  const taken = new Set(cells.map(c => `${c.x},${c.y}`))
+  const ring = new Set<string>()
+  for (const c of cells)
+    for (let dx = -1; dx <= 1; dx++)
+      for (let dy = -1; dy <= 1; dy++) {
+        const x = c.x + dx
+        const y = c.y + dy
+        const k = `${x},${y}`
+        if (x >= 0 && y >= 0 && x < GRID_W && y < GRID_H && !taken.has(k)) ring.add(k)
+      }
+  const outline = runs(
+    [...ring].map(k => {
+      const [x = 0, y = 0] = k.split(',').map(Number)
+      return { x, y, c: OUTLINE }
+    }),
+  )
+  const byClass = new Map<string, Cell[]>()
+  for (const c of cells) {
+    if (!byClass.has(c.cls)) byClass.set(c.cls, [])
+    byClass.get(c.cls)?.push(c)
+  }
+  const propGroups = new Map<string, string>([...byClass].map(([k, v]) => [k, runs(v)]))
+
+  const order = ['frost', 'bd', 'la', 'lb', 'arm', 'arm2', 'ice', 'shine', 'fx', 'fx2']
+  const crabPart = [...order, ...[...groups.keys()].filter(k => !order.includes(k))]
     .filter(k => groups.has(k))
     .map(k => `<g class="${k}">${(groups.get(k) ?? []).join('')}</g>`)
     .join('')
-  const width = Math.round((size * 40) / 30)
-  const place = opts.mirror ? ' transform="translate(40,0) scale(-1,1)"' : ''
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${size}" viewBox="0 0 40 30" shape-rendering="crispEdges">${ICON_CSS}<g class="ci ci-${tone}"${place}>${body}</g></svg>`
+  const propPart =
+    `<g class="ol">${outline}</g>` + [...propGroups].map(([k, v]) => `<g class="${k}">${v}</g>`).join('')
+  const width = Math.round((size * GRID_W) / GRID_H)
+  const place = opts.mirror ? ` transform="translate(${GRID_W},0) scale(-1,1)"` : ''
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${size}" viewBox="0 0 ${GRID_W} ${GRID_H}" shape-rendering="crispEdges">${ICON_CSS}<g class="ci ci-${tone}"${place}>${crabPart}${propPart}</g></svg>`
 }
+
+export const iconWidth = (size: number): number => Math.round((size * GRID_W) / GRID_H)
 
 // What each icon replaces, for the preview sheet and the alt texts.
 export const ICON_LABEL: Record<IconKind, [label: string, emoji: string]> = {

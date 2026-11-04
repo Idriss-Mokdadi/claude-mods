@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { ICON_KINDS, ICON_LABEL, TONES, crabIcon } from '../hooks/crab-icons'
+import { BODY, ICON_KINDS, ICON_LABEL, TONES, crabIcon } from '../hooks/crab-icons'
 
 // A small well-formedness check: every tag closes, in order, and every number is finite.
 const isWellFormed = (svg: string): boolean => {
@@ -22,9 +22,9 @@ test('every kind in every tone is one well-formed SVG with a crab and a prop', (
     for (const tone of TONES) {
       const svg = crabIcon(kind, tone)
       expect(svg.startsWith('<svg xmlns="http://www.w3.org/2000/svg"')).toBe(true)
-      expect(svg).toContain('viewBox="0 0 40 30"')
+      expect(svg).toContain('viewBox="0 0 34 24"')
       expect(isWellFormed(svg)).toBe(true)
-      expect((svg.match(/<rect /g) ?? []).length).toBeGreaterThan(20)
+      expect((svg.match(/<rect /g) ?? []).length).toBeGreaterThan(12)
       expect(svg).toContain(`ci-${tone}`)
     }
 })
@@ -36,25 +36,30 @@ test('every kind has a label and the emoji it replaces', () => {
 
 test('size, mirror, reduced motion and the theme classes', () => {
   const svg = crabIcon('cost', 'green', { size: 80, mirror: true })
-  expect(svg).toContain('width="107" height="80"')
+  expect(svg).toContain('width="113" height="80"')
   expect(svg).toContain('scale(-1,1)')
   expect(svg).toContain('prefers-reduced-motion')
   expect(svg).toContain('prefers-color-scheme: dark')
 })
 
-test('tone changes the pose: red is red-bodied, green has a heart', () => {
-  expect(crabIcon('tools', 'red')).toContain('#E5484D')
-  expect(crabIcon('tools', 'red')).not.toContain('#D97757')
-  expect(crabIcon('tools', 'green')).toContain('#D97757')
+test('each mood has its own body colour, and the prop is outlined', () => {
+  const colours = new Set(TONES.map(t => BODY[t]))
+  expect(colours.size).toBe(4)
+  for (const t of TONES) expect(crabIcon('tools', t)).toContain(`fill="${BODY[t]}"`)
+  expect(crabIcon('tools', 'red')).not.toContain(`fill="${BODY.green}"`)
+  expect(crabIcon('usage', 'green')).toContain('<g class="ol"><rect')
 })
 
-test('context backpack fills with pct; cold cache sleeps; wrong model is confused', () => {
-  const empty = crabIcon('context', 'green', { pct: 0 })
-  const full = crabIcon('context', 'green', { pct: 100 })
-  expect(empty).not.toContain('height="7" fill="#3B9C5F"')
-  expect(full).toContain('height="7" fill="#3B9C5F"')
-  expect(crabIcon('cache', 'yellow', { cold: true })).toContain('class="zz"')
-  expect(crabIcon('cache', 'yellow')).not.toContain('class="zz"')
+test('context backpack fills with pct; cache is an outline, cold sleeps in frost; wrong model is confused', () => {
+  const count = (svg: string, c: string) => svg.split(`fill="${c}"`).length - 1
+  expect(crabIcon('context', 'green', { pct: 0 })).not.toContain('width="6" height="1" fill="#2FA866"')
+  expect(count(crabIcon('context', 'green', { pct: 100 }), '#2FA866')).toBeGreaterThan(6)
+  const warm = crabIcon('cache', 'green')
+  expect(warm).not.toContain('class="frost"')
+  expect(warm).toContain(`fill="${BODY.green}"`)
+  const cold = crabIcon('cache', 'yellow', { cold: true })
+  expect(cold).toContain('class="frost"')
+  expect(cold).toContain('class="zz"')
   expect(crabIcon('model', 'red')).toContain('class="q"')
   expect(crabIcon('model', 'green')).not.toContain('class="q"')
 })

@@ -11,15 +11,19 @@ A usage cockpit for Claude Code: one band above the prompt and one panel that sh
 
 ## What it shows
 
-**Collapsed (default):** one small button above the prompt: a mood crab, `📊 Usage` and one emoji for the worst state right now (😊 ok, 😐 mid, 😰 warning, 😡 critical or wrong model). Other mods' bands (the workspace Files button) sit beside it.
+![The cockpit's pixel crabs, one per line, in four moods](docs/crab-sheet-light.png)
 
-**Expanded** (press the button; press again to collapse; the choice is remembered across sessions): one item per line, each with a small crab, a progress bar, the value and a mood emoji:
+On desktop and mobile every line carries a **pixel crab** holding the line's prop (backpack for context, stopwatch, calendar, coin, ice cube, gauge, scroll, wrench, plug, puzzle piece, notebook, speech bubble, suitcase, clamp). Its mood follows that line's own bar, by colour and by pose: **calm clay, happy** (green, under 50%), **light clay, scratching its head** (yellow, 50-70%), **vivid orange, sweating** (orange, 70-85%), **red, steaming, snapping** (red, over 85%, or a wrong model, with a "?"). A cold cache shows the crab asleep in a frosted ice cube. Animations stop under reduced motion. The terminal keeps text and emojis.
 
-- 🧠 Context · ⏱️ 5-hour limit (reset time) · 📅 7-day limit · 💵 Session cost (against a budget) · 🧊 Cache (the bar drains as the TTL runs out, `m:ss left`; a sleeping crab when cold) · 🤖 Model & effort: current vs suggested, with a **Switch** button on that line only.
-- 🔎 **What uses your tokens:** 📜 System prompt, 🔧 System tools, 🔌 MCP tools, 🧩 Skills, 🗂️ Memory files, 💬 Messages; then the top 5 tools, skills and subagents (estimate).
-- At the critical level: **Compact now** and **Handoff**. Always: **Full list** (opens `/usage-panel`).
+**Collapsed (default):** one small button: the `usage` crab in the worst mood of all lines, and the word Usage. Other mods' bands (the workspace Files button) sit beside it.
 
-Bar colours: green under 50%, yellow 50-70%, orange 70-85%, red over 85% with the angry crab. A wrong model (two tiers off, or effort two levels off) is red too.
+![Collapsed band](docs/band-collapsed-critical-140col-light.png)
+
+**Expanded** (press the button; press again to collapse; the choice is remembered across sessions): one item per line, each with its crab, the value and a progress bar: Context · 5-hour limit (reset time) · 7-day limit · Session cost (against a budget) · Cache (the bar drains as the TTL runs out, `m:ss left`) · Model & effort (current vs suggested, **Switch** on that line only). Then **What uses your tokens**: System prompt, System tools, MCP tools, Skills, Memory files, Messages, and the top 5 tools, skills and subagents (estimate). At the critical level, **Compact now** and **Handoff**; always, **Full list**.
+
+![Expanded band](docs/band-expanded-mixed-50col-light.png)
+
+Bar colours: green under 50%, yellow 50-70%, orange 70-85%, red over 85%.
 
 **`/usage-panel`** shows the same lines (the only view on mobile, which has no band), plus **Show all** for every tool, MCP server, memory file and skill, and **Refresh**.
 
