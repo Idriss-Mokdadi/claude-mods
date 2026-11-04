@@ -1,0 +1,20 @@
+{
+  "name": "memory",
+  "version": "0.1.0",
+  "description": "Spots corrections and preferences in your prompts (English, French, Arabic) and asks before saving each one as a rule in CLAUDE.md.",
+  "author": {
+    "name": "Mohamed Idriss Mokdadi",
+    "url": "https://github.com/Idriss-Mokdadi"
+  },
+  "license": "MIT",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "language": {
+      "type": "string",
+      "title": "Band language",
+      "description": "auto follows Claude Code's language setting, then the system locale; en, fr or ar (Arabic, drawn right to left)",
+      "default": "auto",
+      "options": ["auto", "en", "fr", "ar"]
+    }
+  }
+}
