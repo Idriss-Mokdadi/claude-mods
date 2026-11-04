@@ -15,17 +15,23 @@ A usage cockpit for Claude Code: one band above the prompt and one panel that sh
 
 On desktop and mobile every line carries a **pixel crab** holding the line's prop (backpack for context, stopwatch, calendar, coin, ice cube, gauge, scroll, wrench, plug, puzzle piece, notebook, speech bubble, suitcase, clamp). Its mood follows that line's own bar, by colour and by pose: **calm clay, happy** (green, under 50%), **light clay, scratching its head** (yellow, 50-70%), **vivid orange, sweating** (orange, 70-85%), **red, steaming, snapping** (red, over 85%, or a wrong model, with a "?"). A cold cache shows the crab asleep in a frosted ice cube. Animations stop under reduced motion. The terminal keeps text and emojis.
 
-**Collapsed (default):** one small button: the `usage` crab in the worst mood of all lines, and the word Usage. Other mods' bands (the workspace Files button) sit beside it.
+**Collapsed (default):** one row: the `usage` crab in the worst mood of all lines, **Usage**, **Full list**, then the other mods' bands (the workspace Files button).
 
-![Collapsed band](docs/band-collapsed-critical-140col-light.png)
+![Collapsed band](docs/v05-collapsed-60col-dark.png)
 
-**Expanded** (press the button; press again to collapse; the choice is remembered across sessions): one item per line, each with its crab, the value and a progress bar: Context · 5-hour limit (reset time) · 7-day limit · Session cost (against a budget) · Cache (the bar drains as the TTL runs out, `m:ss left`) · Model & effort (current vs suggested, **Switch** on that line only). Then **What uses your tokens**: System prompt, System tools, MCP tools, Skills, Memory files, Messages, and the top 5 tools, skills and subagents (estimate). At the critical level, **Compact now** and **Handoff**; always, **Full list**.
+**Expanded** (press Usage; press again to collapse; the choice is remembered across sessions): the same top row (plus **Compact now** and **Handoff** at the critical level), then one row per item, the bar inline at the right: Context · 5-hour limit (reset time) · 7-day limit · Session cost (against a budget) · Cache (`m:ss left`, the bar drains) · Model & effort (current vs suggested, why, and **Switch** on the same row when it fits).
 
-![Expanded band](docs/band-expanded-mixed-50col-light.png)
+![Expanded band](docs/v05-expanded-140col-dark.png)
+
+The band is laid out to fit the window the app gives it (`maxRows`; a taller band only scrolls, and the desktop shows its window): one row per item first; if that is too tall, 5-hour with 7-day and cost with cache share a row; then the bars go; at the very least, one summary row (`ctx 62% · 5h 74% · … · opus·high → haiku·low`) and Switch.
+
+**Full list** opens the **What uses your tokens** pane (press again to close it): System prompt, System tools, MCP tools, MCP server instructions, Skills, Memory files, Messages, then the top tools, skills and subagents (estimate), with **Show all** and **Refresh**.
+
+![Full list pane](docs/v05-fulllist-pane-60col-dark.png)
 
 Bar colours: green under 50%, yellow 50-70%, orange 70-85%, red over 85%.
 
-**`/usage-panel`** shows the same lines (the only view on mobile, which has no band), plus **Show all** for every tool, MCP server, memory file and skill, and **Refresh**.
+**`/usage-panel`** shows everything: the limit lines and the full list (the only view on mobile, which has no band).
 
 ## Features
 

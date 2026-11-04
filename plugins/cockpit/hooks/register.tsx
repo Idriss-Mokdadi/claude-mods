@@ -38,6 +38,7 @@ import {
 } from './lib'
 
 const PANE = 'cockpit-usage'
+const TOKENS = 'cockpit-tokens'
 const STORE_EXPANDED = 'cockpit.expanded'
 
 const snapshot = atom({ plugin: 'cockpit', key: 'snapshot' } as const, null, { shape: 'snap-1' })
@@ -430,6 +431,17 @@ async function togglePane($: EngineInterface): Promise<boolean> {
   return true
 }
 
+// Full list: the "What uses your tokens" pane; pressed again, it closes.
+async function toggleTokens($: EngineInterface): Promise<boolean> {
+  if ((await $.ui.panes()).some(p => p.id === TOKENS)) {
+    await $.ui.close({ id: TOKENS })
+    return false
+  }
+  await $.ui.open({ id: TOKENS, title: tr().whatUses })
+  void refreshData($, 'full')
+  return true
+}
+
 async function toggleBand($: EngineInterface): Promise<void> {
   const isUp = await update($, expanded, v => !v)
   try {
@@ -450,6 +462,9 @@ type Line = {
   // The pixel crab drawn on desktop and mobile in place of the emoji.
   icon: IconKind
   cold?: boolean
+  // The model line's reasons ("why: complex · many bugs"), shown after the value.
+  why?: string
+  short?: string
   label: string
   value: string
   pct: number
@@ -554,7 +569,9 @@ async function viewOf($: EngineInterface): Promise<View> {
         emoji: '🤖',
         icon: 'model',
         label: s.lineModel,
-        value: `${s.now}: ${curName} · ${cur ?? '?'} → ${s.suggest} ${a.model} · ${a.effort} · ${fitWord(a)}${a.why?.length ? ` · ${s.why}: ${whyText(a.why, lang)}` : ''}${a.aiUsd !== undefined ? ` · ${fill(s.aiCost, { usd: fmtCost(a.aiUsd) })}` : ''}`,
+        value: `${s.now}: ${curName} · ${cur ?? '?'} → ${s.suggest} ${a.model} · ${a.effort} · ${fitWord(a)}${a.aiUsd !== undefined ? ` · ${fill(s.aiCost, { usd: fmtCost(a.aiUsd) })}` : ''}`,
+        why: a.why?.length ? `${s.why}: ${whyText(a.why, lang)}` : undefined,
+        short: `${familyOf(a.currentModel || model) || curName}·${cur ?? '?'} → ${a.model}·${a.effort}`,
         pct: ((effortRank(cur) + 1) / EFFORTS.length) * 100,
         marker: ((effortRank(a.effort) + 1) / EFFORTS.length) * 100,
         tone: mt,
@@ -758,90 +775,242 @@ export const register: Register = (on, options) => {
   // -------------------------------------------------------------------------
   // Drawing.
 
-  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const s = tr()
-    const ui = $.ui.resolve(e) as unknown as UI
-    const v = await viewOf($)
-    const data = await read($, pane)
-    const all = await read($, showAll)
-    const size = sizeOf(e.props.bodyColumns, e.surface !== 'terminal' && 'Svg' in ui, 32)
-    const { Box, Text, Button } = ui
-    const switchBtn = switchButton(ui, $, v, size)
-    const more: Line[] = all && data
-      ? [
-          ...listLines('mcp', '🔌', 'mcp', data.mcpServers),
-          ...listLines('mem', '🗂️', 'memory', data.memory.map(m => ({ name: m.path, tokens: m.tokens }))),
-          ...listLines('skill', '🧩', 'skills', data.skills),
-        ]
-      : []
-    return (
-      <Box flexDirection="column" alignItems={isRtl() ? 'flex-end' : undefined}>
-        {header(ui, $, v, size, false)}
-        {v.status.map(l => lineEl(ui, l, size, l.key === 'model' ? switchBtn : null))}
-        {guardButtons(ui, $, v, size)}
-        {heading(ui, size, 'breakdown', s.whatUses)}
-        {data === null ? <Text dimColor>{s.loading}</Text> : null}
-        {data?.error ? <Text color="red">{data.error}</Text> : null}
-        {breakdownLines(data).map(l => lineEl(ui, l, size))}
-        {data ? (
-          heading(ui, size, 'usage', s.topUsers, s.estimate)
-        ) : null}
-        {attrLines(data, all ? 1000 : 5).map(l => lineEl(ui, l, size))}
-        {all && data
-          ? [
-              lineEl(ui, { key: 'you', emoji: '🙋', icon: 'messages', label: s.userTokens, value: `≈${fmtTokens(data.userTokens)}`, pct: 0, tone: null }, size),
-              lineEl(ui, { key: 'reply', emoji: '💬', icon: 'messages', label: s.replyTokens, value: `≈${fmtTokens(data.replyTokens)}`, pct: 0, tone: null }, size),
-            ]
-          : null}
-        {more.length ? heading(ui, size, 'memory', `${s.mcpBy} · ${s.memory} · ${s.skills}`) : null}
-        {more.map(l => lineEl(ui, l, size))}
-        <Box flexDirection="row" gap={1} flexWrap="wrap">
-          <Button key="refresh" label={size.isSvg ? s.refresh : `🔄 ${s.refresh}`} plain onPress={() => refreshData($, 'full')} />
-          <Button key="show-all" label={all ? `▴ ${s.showLess}` : `▾ ${s.showAll}`} plain onPress={() => update($, showAll, x => !x)} />
-        </Box>
-        {data ? <Text dimColor>{s.estimateNote}</Text> : null}
-      </Box>
-    )
-  })
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => drawPane($, e, true))
+  on('ui.render', { component: 'Pane', requestId: TOKENS }, async ($, e) => drawPane($, e, false))
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
-    // Draw with the other mods' bands; the engine's placeholder is never nested.
+    // Draw with the other mods' bands beside our top row; the engine's
+    // placeholder is never nested.
     const drawn = await Promise.resolve(next(e)).catch(() => null)
     const below = drawn && typeof drawn === 'object' && (drawn as { type?: string }).type !== 'engine' ? drawn : null
-    const s = tr()
     const ui = $.ui.resolve(e) as unknown as UI
-    const { Box, Text } = ui
+    const { Box } = ui
     const v = await viewOf($)
     const isUp = await read($, expanded)
     const size = sizeOf(e.props.bodyColumns, e.surface !== 'terminal' && 'Svg' in ui)
-
-    if (!isUp) {
-      // Collapsed: one small button; the other mods' bands sit beside it.
-      return (
-        <Box flexDirection={isRtl() ? 'row-reverse' : 'row'} gap={1} flexWrap="wrap" alignItems="center">
-          {header(ui, $, v, size, true)}
-          {below as never}
-        </Box>
-      )
-    }
-    const data = await read($, pane)
+    const top = topRow(ui, $, v, size, isUp, below)
+    if (!isUp) return top
+    const layout = bandLayout(v, e.props.bodyColumns, e.props.maxRows, size.isSvg, topRowsOf(v, e.props.bodyColumns, below !== null))
     return (
       <Box flexDirection="column">
-        {header(ui, $, v, size, true)}
-        {v.status.map(l => lineEl(ui, l, size, l.key === 'model' ? switchButton(ui, $, v, size) : null))}
-        {guardButtons(ui, $, v, size)}
-        {heading(ui, size, 'breakdown', s.whatUses)}
-        {data === null ? <Text dimColor>{s.loading}</Text> : null}
-        {breakdownLines(data).map(l => lineEl(ui, l, size))}
-        {data && data.attribution.length ? (
-          heading(ui, size, 'usage', s.topUsers, s.estimate)
-        ) : null}
-        {attrLines(data, 5).map(l => lineEl(ui, l, size))}
-        {below as never}
+        {top}
+        {layout.rows.map(r => bandRow(ui, $, v, r, size, layout.hasBars))}
       </Box>
     )
   })
+}
+
+// ---------------------------------------------------------------------------
+// The panes: /usage-panel (everything, the only view on mobile) and Full list
+// ("What uses your tokens": the breakdown alone).
+
+async function drawPane($: EngineInterface, e: El, withStatus: boolean) {
+  const s = tr()
+  const ui = $.ui.resolve(e) as unknown as UI
+  const v = await viewOf($)
+  const data = await read($, pane)
+  const all = await read($, showAll)
+  const size = sizeOf(e.props.bodyColumns, e.surface !== 'terminal' && 'Svg' in ui, 32)
+  const { Box, Text, Button } = ui
+  const more: Line[] = all && data
+    ? [
+        ...listLines('mcp', '🔌', 'mcp', data.mcpServers),
+        ...listLines('mem', '🗂️', 'memory', data.memory.map(m => ({ name: m.path, tokens: m.tokens }))),
+        ...listLines('skill', '🧩', 'skills', data.skills),
+      ]
+    : []
+  return (
+    <Box flexDirection="column" alignItems={isRtl() ? 'flex-end' : undefined}>
+      {withStatus ? header(ui, $, v, size, false) : null}
+      {withStatus ? v.status.map(l => lineEl(ui, l, size, l.key === 'model' ? switchButton(ui, $, v, size) : null)) : null}
+      {withStatus ? guardButtons(ui, $, v, size) : null}
+      {withStatus ? heading(ui, size, 'breakdown', s.whatUses) : null}
+      {data === null ? <Text dimColor>{s.loading}</Text> : null}
+      {data?.error ? <Text color="red">{data.error}</Text> : null}
+      {breakdownLines(data).map(l => lineEl(ui, l, size))}
+      {data ? heading(ui, size, 'usage', s.topUsers, s.estimate) : null}
+      {attrLines(data, all ? 1000 : 5).map(l => lineEl(ui, l, size))}
+      {all && data
+        ? [
+            lineEl(ui, { key: 'you', emoji: '🙋', icon: 'messages', label: s.userTokens, value: `≈${fmtTokens(data.userTokens)}`, pct: 0, tone: null }, size),
+            lineEl(ui, { key: 'reply', emoji: '💬', icon: 'messages', label: s.replyTokens, value: `≈${fmtTokens(data.replyTokens)}`, pct: 0, tone: null }, size),
+          ]
+        : null}
+      {more.length ? heading(ui, size, 'memory', `${s.mcpBy} · ${s.memory} · ${s.skills}`) : null}
+      {more.map(l => lineEl(ui, l, size))}
+      <Box flexDirection="row" gap={1} flexWrap="wrap">
+        <Button key="show-all" label={all ? `▴ ${s.showLess}` : `▾ ${s.showAll}`} plain onPress={() => update($, showAll, x => !x)} />
+        <Button key="refresh" label={size.isSvg ? s.refresh : `🔄 ${s.refresh}`} plain onPress={() => refreshData($, 'full')} />
+      </Box>
+      {data ? <Text dimColor>{s.estimateNote}</Text> : null}
+    </Box>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// The band's layout: one row per item, the bar inline at the right, so the
+// whole band stays within `maxRows` (the engine scrolls a taller band, and the
+// desktop shows only its window). Widths are counted in the band's columns.
+
+const CRAB_COLS = 5
+const BAR_COLS = 14
+const GAP_COLS = 3
+
+export type BandRow = { key: string; lines: Line[]; text: string; switchInline: boolean; rows: number; summary?: string }
+export type BandLayout = { rows: BandRow[]; total: number; hasBars: boolean; isTight: boolean }
+
+// The text a row shows: label and value, and the "why" of the model line only
+// when it still fits on the row.
+function rowText(lines: Line[], avail: number, isSvg: boolean): string {
+  return lines
+    .map(l => {
+      const end = isSvg ? '' : lineEnd(l)
+      const base = `${isSvg ? '' : l.emoji + ' '}${l.label} ${l.value}${end ? ' ' + end : ''}`
+      if (l.key === 'model' && l.why && `${base} · ${l.why}`.length <= avail) return `${base} · ${l.why}`
+      return base
+    })
+    .join('   ')
+}
+
+export function bandLayout(v: Pick<View, 'status' | 'advice'>, columns: number, maxRows: number, isSvg: boolean, topRows = 1): BandLayout {
+  const cols = Math.max(20, columns || 60)
+  const budget = Math.max(1 + topRows, maxRows || 12) - topRows // what the top row leaves
+  const switchCols = v.advice && modelTone(v.advice) !== 'green' ? `${tr().apply} → ${v.advice.model} · ${v.advice.effort}`.length + 6 : 0
+  const build = (groups: Line[][], hasBars: boolean): BandLayout => {
+    const avail = cols - CRAB_COLS - GAP_COLS - (hasBars ? BAR_COLS : 0)
+    const rows = groups.map(g => {
+      const text = rowText(g, avail, isSvg)
+      const isModel = g.some(l => l.key === 'model')
+      const switchInline = isModel && switchCols > 0 && text.length + switchCols <= avail
+      const lines = Math.max(1, Math.ceil(text.length / Math.max(10, avail)))
+      return { key: g.map(l => l.key).join('+'), lines: g, text, switchInline, rows: lines + (isModel && switchCols > 0 && !switchInline ? 1 : 0) }
+    })
+    const total = topRows + rows.reduce((n, r) => n + r.rows, 0)
+    return { rows, total, hasBars, isTight: groups.length < v.status.length }
+  }
+  const single = v.status.map(l => [l])
+  const pairs = (): Line[][] => {
+    const by = (k: string) => v.status.find(l => l.key === k)
+    const out: Line[][] = []
+    const take = (...keys: string[]) => {
+      const g = keys.map(by).filter((l): l is Line => l !== undefined)
+      if (g.length) out.push(g)
+    }
+    take('ctx')
+    take('five_hour', 'seven_day')
+    take('cost', 'cache')
+    take('model')
+    return out
+  }
+  for (const [groups, hasBars] of [[single, true], [pairs(), true], [pairs(), false]] as const) {
+    const l = build(groups, hasBars)
+    if (l.total <= budget + topRows) return l
+  }
+  // Last resort for a very low window: every item in one short summary row.
+  const summary = v.status.map(briefOf).filter(Boolean).join(' · ')
+  const avail = cols - CRAB_COLS - GAP_COLS
+  const switchInline = switchCols > 0 && summary.length + switchCols <= avail
+  const rows = Math.max(1, Math.ceil(summary.length / Math.max(10, avail))) + (switchCols > 0 && !switchInline ? 1 : 0)
+  return { rows: [{ key: 'summary', lines: v.status, text: summary, switchInline, rows, summary }], total: topRows + rows, hasBars: false, isTight: true }
+}
+
+// An item in a few characters: "ctx 62%", "5h 74%", "$1.23", "cache 59:00".
+function briefOf(l: Line): string {
+  const s = tr()
+  const first = l.value.split(' · ')[0] ?? l.value
+  if (l.key === 'ctx') return `${s.ctx} ${first}`
+  if (l.key === 'five_hour') return `${s.h5} ${first}`
+  if (l.key === 'seven_day') return `${s.d7} ${first}`
+  if (l.key === 'cost') return first.split(' ')[0] ?? first
+  if (l.key === 'cache') return l.cold ? s.cacheCold : l.tone ? `${s.cache} ${first.split(' ')[0]}` : ''
+  if (l.key === 'model') return l.short ?? ''
+  return ''
+}
+
+function bandRow(ui: UI, $: EngineInterface, v: View, r: BandRow, size: Size, hasBars: boolean) {
+  const { Box, Text, Svg } = ui
+  if (r.summary !== undefined) {
+    const sw = switchButton(ui, $, v, size)
+    return (
+      <Box key="row-summary" flexDirection="column">
+        <Box flexDirection={isRtl() ? 'row-reverse' : 'row'} gap={1} alignItems="center">
+          {size.isSvg ? <Box flexShrink={0}>{iconEl(ui, 'usage', v.worst, size)}</Box> : null}
+          <Box flexShrink={1} flexGrow={1}>
+            <Text color={TONE_COLOR[v.worst]}>{r.summary}</Text>
+          </Box>
+          {sw && r.switchInline ? <Box flexShrink={0}>{sw as never}</Box> : null}
+        </Box>
+        {sw && !r.switchInline ? (
+          <Box flexDirection="row" flexWrap="wrap">
+            {sw as never}
+          </Box>
+        ) : null}
+      </Box>
+    )
+  }
+  const lead = r.lines[0] as Line
+  const worst = worstTone(r.lines.flatMap(l => (l.tone ? [l.tone] : [])))
+  const tone = r.lines.length > 1 ? worst : lead.tone
+  const sw = r.lines.some(l => l.key === 'model') ? switchButton(ui, $, v, size) : null
+  return (
+    <Box key={`row-${r.key}`} flexDirection="column">
+      <Box flexDirection={isRtl() ? 'row-reverse' : 'row'} gap={1} alignItems="center">
+        {size.isSvg ? (
+          <Box flexShrink={0}>{iconEl(ui, lead.icon, tone ?? iconTone(lead), size, lead)}</Box>
+        ) : lead.crab ? (
+          <Box flexShrink={0}>{crabEl(ui, lead.crab, size, tone)}</Box>
+        ) : null}
+        <Box flexShrink={1} flexGrow={1}>
+          <Text>
+            {r.lines.map((l, i) => (
+              <Text key={l.key}>
+                {i > 0 ? '   ' : ''}
+                {size.isSvg ? '' : `${l.emoji} `}
+                <Text bold>{l.label}</Text> <Text color={l.tone ? TONE_COLOR[l.tone] : undefined}>{l.value}</Text>
+                {l.key === 'model' && l.why && r.text.includes(l.why) ? <Text dimColor> · {l.why}</Text> : ''}
+                {size.isSvg ? '' : lineEnd(l) ? ` ${lineEnd(l)}` : ''}
+              </Text>
+            ))}
+          </Text>
+        </Box>
+        {hasBars ? (
+          <Box flexShrink={0}>
+            {size.isSvg && Svg ? (
+              <Svg source={barSvg(BAR_PX, lead.pct, lineColor(lead), lead.marker)} alt={altOf(lead)} width={BAR_PX} height={10} />
+            ) : (
+              <Text color={lineColor(lead)}>{bar(lead.pct, 10)}</Text>
+            )}
+          </Box>
+        ) : null}
+        {sw && r.switchInline ? <Box flexShrink={0}>{sw as never}</Box> : null}
+      </Box>
+      {sw && !r.switchInline ? (
+        <Box flexDirection="row" flexWrap="wrap">
+          {sw as never}
+        </Box>
+      ) : null}
+    </Box>
+  )
+}
+
+const BAR_PX = 96
+
+// Rows the top row takes: its crab and buttons, and the other mods' bands
+// (counted as one button's width), wrapped at the band's width.
+function topRowsOf(v: View, columns: number, hasBelow: boolean): number {
+  const s = tr()
+  const cols = Math.max(20, columns || 60)
+  const items = [CRAB_COLS, s.bandUsage.length + 6, s.fullList.length + 6]
+  if (v.level === 'critical') items.push(CRAB_COLS, s.compact.length + 6, CRAB_COLS, s.handoff.length + 6)
+  if (hasBelow) items.push(12)
+  let rows = 1
+  let line = 0
+  for (const w of items) {
+    if (line + w > cols && line > 0) ((rows += 1), (line = 0))
+    line += w
+  }
+  return rows
 }
 
 // ---------------------------------------------------------------------------
@@ -891,6 +1060,7 @@ function heading(ui: UI, size: Size, kind: IconKind, title: string, note?: strin
   )
 }
 
+// A pane line: text row, then a full-width bar (panes scroll, so they keep room).
 function lineEl(ui: UI, l: Line, size: Size, extra: unknown = null) {
   const { Box, Text, Svg } = ui
   const end = lineEnd(l)
@@ -906,10 +1076,12 @@ function lineEl(ui: UI, l: Line, size: Size, extra: unknown = null) {
           {size.isSvg ? (
             <Text>
               <Text bold>{l.label}</Text> <Text color={l.tone ? TONE_COLOR[l.tone] : undefined}>{l.value}</Text>
+              {l.why ? <Text dimColor> · {l.why}</Text> : ''}
             </Text>
           ) : (
             <Text>
               {l.emoji} <Text bold>{l.label}</Text> <Text color={l.tone ? TONE_COLOR[l.tone] : undefined}>{l.value}</Text>
+              {l.why ? <Text dimColor> · {l.why}</Text> : ''}
               {end ? ` ${end}` : ''}
             </Text>
           )}
@@ -941,6 +1113,27 @@ function header($ui: UI, $: EngineInterface, v: View, size: Size, isBand: boolea
   )
 }
 
+// The band's top row: [crab] Usage · Full list (· Compact now · Handoff when
+// expanded at the critical level) · the other mods' bands.
+function topRow(ui: UI, $: EngineInterface, v: View, size: Size, isUp: boolean, below: unknown) {
+  const { Box, Button } = ui
+  const s = tr()
+  const label = size.isSvg ? s.bandUsage : `${crabText(v.mood)} 📊 ${s.bandUsage} ${TONE_EMOJI[v.worst]}`
+  const isCritical = isUp && v.level === 'critical'
+  return (
+    <Box key="cockpit-top" flexDirection={isRtl() ? 'row-reverse' : 'row'} gap={1} alignItems="center" flexWrap="wrap">
+      {size.isSvg ? iconEl(ui, 'usage', v.worst, size) : null}
+      <Button key="cockpit-usage" label={label} plain onPress={() => toggleBand($)} />
+      <Button key="cockpit-full" label={size.isSvg ? s.fullList : `📋 ${s.fullList}`} plain onPress={() => toggleTokens($)} />
+      {isCritical && size.isSvg ? iconEl(ui, 'compact', 'red', size) : null}
+      {isCritical ? <Button key="cockpit-compact" label={size.isSvg ? s.compact : `🗜️ ${s.compact}`} variant="primary" onPress={() => compactNow($)} /> : null}
+      {isCritical && size.isSvg ? iconEl(ui, 'handoff', 'orange', size) : null}
+      {isCritical ? <Button key="cockpit-handoff" label={size.isSvg ? s.handoff : `🧳 ${s.handoff}`} onPress={() => runHandoff($)} /> : null}
+      {below as never}
+    </Box>
+  )
+}
+
 function guardButtons(ui: UI, $: EngineInterface, v: View, size: Size) {
   const { Box, Button } = ui
   const s = tr()
@@ -950,7 +1143,7 @@ function guardButtons(ui: UI, $: EngineInterface, v: View, size: Size) {
       {v.level === 'critical' ? <Button key="cockpit-compact" label={size.isSvg ? s.compact : `🗜️ ${s.compact}`} variant="primary" onPress={() => compactNow($)} /> : null}
       {v.level === 'critical' && size.isSvg ? iconEl(ui, 'handoff', 'orange', size) : null}
       {v.level === 'critical' ? <Button key="cockpit-handoff" label={size.isSvg ? s.handoff : `🧳 ${s.handoff}`} onPress={() => runHandoff($)} /> : null}
-      <Button key="cockpit-full" label={size.isSvg ? s.fullList : `📋 ${s.fullList}`} plain onPress={() => openPane($)} />
+      <Button key="cockpit-full" label={size.isSvg ? s.fullList : `📋 ${s.fullList}`} plain onPress={() => toggleTokens($)} />
     </Box>
   )
 }

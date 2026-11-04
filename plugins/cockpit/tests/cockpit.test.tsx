@@ -37,6 +37,7 @@ type World = {
   logs: string[]
   configRows: unknown[]
   modelSwitchWorks: boolean
+  panes: { id: string; title?: string }[]
   store: Map<string, unknown>
   ctx: number
   five: number
@@ -50,7 +51,7 @@ async function start($: Engine, on: On, ctx = 30, setup: Setup = {}) {
   mock.env(on, env)
   const w: World = {
     toasts: [], writes: [], forks: 0, completes: 0, compacted: 0, usage: () => usageAt(w.ctx, w.five), store: new Map(Object.entries(setup.store ?? {})), ctx, five: 20,
-    model: 'claude-opus-5-5', configSets: [], commands: [], logs: [], modelSwitchWorks: true,
+    model: 'claude-opus-5-5', panes: [], configSets: [], commands: [], logs: [], modelSwitchWorks: true,
     configRows: setup.rows ?? [{ key: 'model', label: 'Model', kind: 'choice', value: 'opus', options: ['default', 'sonnet', 'opus', 'haiku'], provider: { plugin: 'engine', tier: 'core' }, isLocked: false }],
   }
   on('ui.render', ($e, e) => {
@@ -81,8 +82,16 @@ async function start($: Engine, on: On, ctx = 30, setup: Setup = {}) {
     w.logs.push(String((e as { text?: string }).text ?? e))
     return { value: undefined } as never
   })
-  on('ui.open', () => ({ value: { isPlaced: true } }) as never)
-  on('ui.panes', () => ({ value: [] }) as never)
+  on('ui.open', (_$, e) => {
+    const { id, title } = e as { id: string; title?: string }
+    w.panes = [...w.panes.filter(p => p.id !== id), { id, title }]
+    return { value: { isPlaced: true } } as never
+  })
+  on('ui.close', (_$, e) => {
+    w.panes = w.panes.filter(p => p.id !== (e as { id: string }).id)
+    return { value: {} } as never
+  })
+  on('ui.panes', () => ({ value: w.panes }) as never)
   on('session.compact', () => {
     w.compacted += 1
     return { messages: [{ role: 'user', text: 'summary', toolUses: [] }] } as never
@@ -162,18 +171,44 @@ for (const surface of SURFACES) {
     await ui.unmount()
   })
 
-  test(`${surface}: pressing Usage shows every item on its own line, and the breakdown`, async ($, on) => {
+  test(`${surface}: pressing Usage shows the six lines, one row each, and no breakdown`, async ($, on) => {
     const { w } = await start($, on)
     await submit($, 'Fix the bug in parser.py where empty lines crash the import')
     const ui = await band($, surface)
     await ui.press({ key: 'cockpit-usage' })
-    for (const label of [/🧠 Context/, /⏱️ 5-hour limit.*resets in 2h 13m/, /📅 7-day limit/, /💵 Session cost.*\$1\.23 of \$5\.00 budget/, /🧊 Cache/, /🤖 Model & effort/, /🔎 What uses your tokens/])
+    for (const label of [/🧠 Context/, /⏱️ 5-hour limit.*resets in 2h 13m/, /📅 7-day limit/, /💵 Session cost.*\$1\.23 of \$5\.00 budget/, /🧊 Cache/, /🤖 Model & effort/])
       expect(await ui.find({ type: 'Text', text: say(surface, label) })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /What uses your tokens/ })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: /Top tools/ })).toBeUndefined()
+    // The top row, then one row per item.
+    const root = (await ui.drawn()) as unknown as { children: unknown[] }
+    expect(root.children.length).toBe(7)
     // Collapsing again; the choice is remembered across sessions.
     expect(w.store.get('cockpit.expanded')).toBe(true)
     await ui.press({ key: 'cockpit-usage' })
-    expect(await ui.find({ type: 'Text', text: /🧠 Context/ })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: say(surface, /🧠 Context/) })).toBeUndefined()
     expect(w.store.get('cockpit.expanded')).toBe(false)
+    await ui.unmount()
+  })
+
+  test(`${surface}: the top row reads Usage · Full list · the other bands`, async ($, on) => {
+    await start($, on)
+    const ui = await band($, surface)
+    const order = async () => {
+      const out: string[] = []
+      const walk = (n: unknown): void => {
+        if (!n || typeof n !== 'object') return
+        const el = n as { type?: string; props?: Record<string, unknown>; children?: unknown[] }
+        if (el.type === 'Button') out.push(String(el.props?.key ?? el.props?.label))
+        if (el.type === 'Text' && Array.isArray(el.children) && el.children.join('') === 'engine') out.push('engine')
+        for (const c of el.children ?? []) walk(c)
+      }
+      walk(await ui.drawn())
+      return out
+    }
+    expect(await order()).toEqual(['cockpit-usage', 'cockpit-full', 'engine'])
+    await ui.press({ key: 'cockpit-usage' })
+    expect((await order()).slice(0, 3)).toEqual(['cockpit-usage', 'cockpit-full', 'engine'])
     await ui.unmount()
   })
 
@@ -190,6 +225,10 @@ for (const surface of SURFACES) {
     await ui.press({ key: 'cockpit-usage' })
     expect(await ui.find({ key: 'cockpit-compact' })).toBeDefined()
     expect(await ui.find({ key: 'cockpit-handoff' })).toBeDefined()
+    // On the top row, right after Full list.
+    const root = (await ui.drawn()) as unknown as { children: { children: { props?: { key?: string } }[] }[] }
+    const keys = (root.children[0]?.children ?? []).map(c => c.props?.key).filter(Boolean)
+    expect(keys.slice(0, 4)).toEqual(['cockpit-usage', 'cockpit-full', 'cockpit-compact', 'cockpit-handoff'])
     await ui.unmount()
   })
 }
@@ -368,19 +407,34 @@ const BREAKDOWN = (e: { breakdown?: string }) =>
       }
 
 for (const surface of SURFACES) {
-  test(`${surface}: the expanded band lists what uses the tokens, with icons`, async ($, on) => {
-    await start($, on, 30, { usage: BREAKDOWN })
+  test(`${surface}: Full list opens the "What uses your tokens" pane, and closes it when pressed again`, async ($, on) => {
+    const { w, clock } = await start($, on, 30, { usage: BREAKDOWN })
     const ui = await band($, surface)
-    await ui.press({ key: 'cockpit-usage' })
+    await ui.press({ key: 'cockpit-full' })
+    await clock.settle()
+    expect(w.panes).toEqual([{ id: 'cockpit-tokens', title: 'What uses your tokens' }])
+    const pane = await $.ui.mount({ plugin: PLUGIN, surface, ...PANE, requestId: 'cockpit-tokens' } as never)
     for (const re of [/📜 System prompt/, /🔧 System tools/, /🔌 MCP tools/, /🧩 Skills/, /🗂️ Memory files/, /💬 Messages/, /Top tools, skills and subagents/, /🔧 Write/])
-      expect(await ui.find({ type: 'Text', text: say(surface, re) })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /Free space/ })).toBeUndefined()
+      expect(await pane.find({ type: 'Text', text: say(surface, re) })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /Free space/ })).toBeUndefined()
+    // The limits stay in the band and in /usage-panel, not here.
+    expect(await pane.find({ type: 'Text', text: /5-hour limit/ })).toBeUndefined()
+    expect(await pane.find({ key: 'show-all' })).toBeDefined()
+    expect(await pane.find({ key: 'refresh' })).toBeDefined()
+    if (surface === 'desktop') {
+      const kinds = await crabs(pane)
+      for (const k of ['system_prompt', 'tools', 'mcp', 'skills', 'memory', 'messages', 'usage']) expect(kinds.some(c => c.startsWith(k + ' '))).toBe(true)
+    }
+    await pane.unmount()
+    await ui.press({ key: 'cockpit-full' })
+    expect(w.panes).toEqual([])
     await ui.unmount()
   })
 
   test(`${surface}: /usage-panel shows the same lines, and Show all adds the full lists`, async ($, on) => {
-    await start($, on, 30, { usage: BREAKDOWN })
+    const { clock } = await start($, on, 30, { usage: BREAKDOWN })
     await $.command.run({ command: 'usage-panel', args: 'open' } as never)
+    await clock.settle()
     const ui = await $.ui.mount({ plugin: PLUGIN, surface, ...PANE } as never)
     expect(await ui.find({ key: 'refresh' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: say(surface, /⏱️ 5-hour limit/) })).toBeDefined()
@@ -430,12 +484,7 @@ test('desktop: each line picks its crab kind and the tone of its own bar', async
   // Worst first (the header), then the lines in order: context yellow (60%), 5h orange (75%),
   // 7d green, cost green, cache green, model red (Opus at high for "hi").
   expect(got.slice(0, 7)).toEqual(['usage red', 'context yellow', 'five_hour orange', 'seven_day green', 'cost green', 'cache green', 'model red'])
-  expect(got).toContain('breakdown green')
-  expect(got).toContain('system_prompt green')
-  expect(got).toContain('mcp green')
-  expect(got).toContain('memory green')
-  expect(got).toContain('messages green')
-  expect(got).toContain('tools green')
+  expect(got.length).toBe(7)
   await ui.unmount()
 })
 
@@ -491,3 +540,57 @@ test('advisor: with advisorAi on, an ambiguous prompt gets one Haiku check and i
   expect(await ui.find({ type: 'Text', text: /AI check ≈\$0\.00/ })).toBeDefined()
   await ui.unmount()
 })
+
+for (const [cols, maxRows, ctx] of [[60, 12, 62], [60, 8, 62], [60, 6, 62], [140, 7, 62], [140, 5, 62], [100, 4, 62], [60, 9, 92], [60, 6, 92]] as const) {
+  test(`desktop: at ${cols} columns and maxRows ${maxRows} (context ${ctx}%) the expanded band fits the window, Switch included`, async ($, on) => {
+    const { w } = await start($, on)
+    // "hi" on Opus at high: the wrong model, so the Switch button shows.
+    await submit($, 'hi')
+    await measure($, w, ctx, 74)
+    const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', component: 'AbovePrompt', props: { ...BAND.props, bodyColumns: cols, maxRows } } as never)
+    await ui.press({ key: 'cockpit-usage' })
+    const rows = bandRows(await ui.drawn(), cols)
+    expect(rows).toBeLessThanOrEqual(maxRows)
+    // Every item is still there, and the Switch button with it.
+    for (const label of [/Context|ctx/, /5-hour limit|5h/, /7-day limit|7d/, /Session cost|\$1\.23/, /Model & effort|→ haiku·low/])
+      expect(await ui.find({ type: 'Text', text: label })).toBeDefined()
+    expect(await ui.find({ key: 'cockpit-switch' })).toBeDefined()
+    await ui.unmount()
+  })
+}
+
+// Rows a drawn band takes, as a surface lays it out: a column adds its children,
+// a row takes its tallest child; a Text wraps at the row's width (its letters
+// over the columns left beside the fixed-width icons, bars and buttons).
+function bandRows(tree: unknown, cols: number): number {
+  type El = { type?: string; props?: Record<string, unknown>; children?: unknown[] }
+  const textOf = (n: unknown): string =>
+    typeof n === 'string' ? n : n && typeof n === 'object' ? ((n as El).children ?? []).map(textOf).join('') : ''
+  const fixedCols = (n: El): number =>
+    n.type === 'Svg' ? Math.ceil(Number(n.props?.width ?? 0) / 8) : n.type === 'Button' ? String(n.props?.label ?? '').length + 4 : (n.children ?? []).reduce((a: number, c) => a + (c && typeof c === 'object' && (c as El).type !== 'Text' ? fixedCols(c as El) : 0), 0)
+  const rows = (n: unknown, width: number): number => {
+    if (!n || typeof n !== 'object') return 0
+    const el = n as El
+    const kids = (el.children ?? []).filter(c => c && typeof c === 'object') as El[]
+    if (el.type === 'Text') return Math.max(1, Math.ceil(textOf(el).length / Math.max(8, width)))
+    if (el.type === 'Svg') return Math.max(1, Math.ceil(Number(el.props?.height ?? 0) / 28))
+    if (el.type === 'Button') return 1
+    if (el.props?.flexDirection === 'row' || el.props?.flexDirection === 'row-reverse') {
+      const fixed = kids.reduce((a, c) => a + (c.type === 'Text' || (c.type === 'Box' && c.children?.some(k => (k as El).type === 'Text')) ? 0 : fixedCols(c) + 1), 0)
+      if (el.props?.flexWrap === 'wrap') {
+        // Wrapping rows: lay the children out greedily.
+        let line = 0
+        let count = 1
+        for (const c of kids) {
+          const wc = c.type === 'Text' ? textOf(c).length : fixedCols(c) + 1
+          if (line + wc > width && line > 0) ((count += 1), (line = 0))
+          line += wc
+        }
+        return count
+      }
+      return Math.max(1, ...kids.map(c => rows(c, width - fixed)))
+    }
+    return kids.reduce((a, c) => a + rows(c, width), 0)
+  }
+  return rows(tree, cols)
+}
