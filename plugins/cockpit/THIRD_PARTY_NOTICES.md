@@ -2,7 +2,7 @@
 
 cockpit copies code from savvy-progress in JohnnyVizz/claude-kit:
 
-- the pixel crab body, the `stamp` helper and the CSS motion (`hooks/crab.ts`);
+- the pixel crab body, the `stamp` helper and the CSS motion (`hooks/crab.ts`, and the body and `stamp` in `hooks/crab-icons.ts`);
 - the per-model price table and cost formula (`hooks/lib.ts`: `PRICES`, `priceOf`, `costOf`);
 - the text-width estimate and the band's chaining of other mods' bands (`hooks/register.tsx`).
 
