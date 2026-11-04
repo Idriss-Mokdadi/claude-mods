@@ -1,0 +1,16 @@
+{
+  "enabledPlugins": {
+    "cockpit@claude-mods": true,
+    "savvy-progress-plus@claude-mods": true,
+    "workspace@claude-mods": true,
+    "memory@claude-mods": true
+  },
+  "extraKnownMarketplaces": {
+    "claude-mods": {
+      "source": {
+        "source": "github",
+        "repo": "Idriss-Mokdadi/claude-mods"
+      }
+    }
+  }
+}
