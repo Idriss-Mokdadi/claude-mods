@@ -1,0 +1,54 @@
+{
+  "name": "cockpit",
+  "version": "0.1.0",
+  "description": "Usage cockpit: a band above the prompt and a /usage-panel with limits, cost, context by category and a per-tool estimate; a free model and effort advisor; a budget guard with Compact and Handoff; /handoff notes; a prompt-cache idle timer.",
+  "author": { "name": "Mohamed Idriss Mokdadi", "url": "https://github.com/Idriss-Mokdadi" },
+  "license": "MIT",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "warnPercent": {
+      "type": "number",
+      "title": "Warning level (%)",
+      "description": "Toast and yellow band when context fill or a plan limit reaches this percent",
+      "default": 70
+    },
+    "criticalPercent": {
+      "type": "number",
+      "title": "Critical level (%)",
+      "description": "Red band with Compact now and Handoff buttons at this percent",
+      "default": 85
+    },
+    "advisor": {
+      "type": "boolean",
+      "title": "Model and effort advisor",
+      "description": "Suggest a model and effort for each prompt with free keyword rules (no model call)",
+      "default": true
+    },
+    "cacheTtl": {
+      "type": "string",
+      "title": "Prompt-cache TTL",
+      "description": "auto: the TTL the engine reports on a model switch, else 1h on a subscription and 5m otherwise",
+      "default": "auto",
+      "options": ["auto", "5m", "1h"]
+    },
+    "keepAlive": {
+      "type": "boolean",
+      "title": "Cache keep-alive pings",
+      "description": "Off by default. When on, a tiny fork reads the cached conversation shortly before the TTL ends, which refreshes it. Each ping costs a cache read of the whole context",
+      "default": false
+    },
+    "keepAliveMaxPings": {
+      "type": "number",
+      "title": "Keep-alive: most pings per idle period",
+      "description": "Pings between two of your turns, at most",
+      "default": 3
+    },
+    "language": {
+      "type": "string",
+      "title": "Language",
+      "description": "auto follows Claude Code's language setting, then the system locale; en, fr or ar (right to left)",
+      "default": "auto",
+      "options": ["auto", "en", "fr", "ar"]
+    }
+  }
+}
