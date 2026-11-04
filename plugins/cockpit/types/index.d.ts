@@ -2,7 +2,9 @@ export type Level = 'ok' | 'warning' | 'critical'
 export type Fit = 'green' | 'yellow' | 'red' | 'unknown'
 export type ModelPick = 'haiku' | 'sonnet' | 'opus'
 export type EffortPick = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
-export type Mood = 'calm' | 'sweat' | 'alarm' | 'suitcase' | 'gauge'
+export type Mood = 'happy' | 'calm' | 'sweat' | 'angry' | 'sleep' | 'suitcase' | 'gauge'
+// green < 50%, yellow 50-warn, orange warn-critical, red past critical.
+export type Tone = 'green' | 'yellow' | 'orange' | 'red'
 
 export type Limit = { kind: string; percent: number; resetsAt?: string }
 
@@ -69,6 +71,8 @@ declare module 'claude-code' {
       pane: Shaped<PaneData | null>
       alerted: Level
       handoff: Shaped<Handoff | null>
+      expanded: boolean
+      showAll: boolean
     }
   }
 }

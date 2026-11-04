@@ -1,22 +1,31 @@
 {
   "name": "cockpit",
-  "version": "0.1.0",
-  "description": "Usage cockpit: a band above the prompt and a /usage-panel with limits, cost, context by category and a per-tool estimate; a free model and effort advisor; a budget guard with Compact and Handoff; /handoff notes; a prompt-cache idle timer.",
-  "author": { "name": "Mohamed Idriss Mokdadi", "url": "https://github.com/Idriss-Mokdadi" },
+  "version": "0.2.0",
+  "description": "Usage cockpit: one small Usage button above the prompt that expands to one line per item (context, 5h and 7d limits, cost, cache, model fit) with progress bars, mood crabs and what uses your tokens; a free model and effort advisor; a budget guard with Compact and Handoff; /handoff notes; /usage-panel.",
+  "author": {
+    "name": "Mohamed Idriss Mokdadi",
+    "url": "https://github.com/Idriss-Mokdadi"
+  },
   "license": "MIT",
   "types": "./types/index.d.ts",
   "userConfig": {
     "warnPercent": {
       "type": "number",
       "title": "Warning level (%)",
-      "description": "Toast and yellow band when context fill or a plan limit reaches this percent",
+      "description": "Orange bars, a toast and the sweating crab from this percent (yellow starts at 50%)",
       "default": 70
     },
     "criticalPercent": {
       "type": "number",
       "title": "Critical level (%)",
-      "description": "Red band with Compact now and Handoff buttons at this percent",
+      "description": "Red bars, the angry crab, and Compact now and Handoff buttons past this percent",
       "default": 85
+    },
+    "costBudgetUsd": {
+      "type": "number",
+      "title": "Session cost budget (USD)",
+      "description": "The cost bar is full at this amount",
+      "default": 5
     },
     "advisor": {
       "type": "boolean",
@@ -29,7 +38,11 @@
       "title": "Prompt-cache TTL",
       "description": "auto: the TTL the engine reports on a model switch, else 1h on a subscription and 5m otherwise",
       "default": "auto",
-      "options": ["auto", "5m", "1h"]
+      "options": [
+        "auto",
+        "5m",
+        "1h"
+      ]
     },
     "keepAlive": {
       "type": "boolean",
@@ -48,7 +61,18 @@
       "title": "Language",
       "description": "auto follows Claude Code's language setting, then the system locale; en, fr or ar (right to left)",
       "default": "auto",
-      "options": ["auto", "en", "fr", "ar"]
+      "options": [
+        "auto",
+        "en",
+        "fr",
+        "ar"
+      ]
+    },
+    "debug": {
+      "type": "boolean",
+      "title": "Debug log",
+      "description": "Log the origin kind and length of each prompt submission, and whether it was advised",
+      "default": false
     }
   }
 }

@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { advise, attribute, costOf, filesTouched, fitOf, handoffName, levelOf, pingCost } from '../hooks/lib'
+import { advise, adviceFor, attribute, categoryIcon, cleanPrompt, costOf, filesTouched, fitOf, handoffName, isPersonOrigin, levelOf, modelTone, pingCost, toneOf, worstTone } from '../hooks/lib'
 
 test('advisor: short and factual prompts go to Haiku, low', () => {
   expect(advise('short: what is OFDM?')).toMatchObject({ model: 'haiku', effort: 'low' })
@@ -69,4 +69,26 @@ test('attribution: tools, skills and subagents, largest first', () => {
 test('handoff helpers: touched files and the file name', () => {
   expect(filesTouched(MSGS)).toEqual(['/r/a.ts', '/r/b.md'])
   expect(handoffName(Date.parse('2026-11-04T20:15:00Z'))).toBe('HANDOFF-2026-11-04-2015.md')
+})
+
+test('bar tones: green < 50, yellow 50-70, orange 70-85, red past 85', () => {
+  expect([10, 50, 69, 70, 85, 86].map(p => toneOf(p))).toEqual(['green', 'yellow', 'yellow', 'orange', 'orange', 'red'])
+  expect(worstTone(['green', 'orange', 'yellow'])).toBe('orange')
+})
+
+test('model tone: Opus at high for "hi" is red, a match is green', () => {
+  expect(modelTone(adviceFor('hi', 'high', 'claude-opus-5-5', 0))).toBe('red')
+  expect(modelTone(adviceFor('hi', 'low', 'claude-haiku-4-5', 0))).toBe('green')
+  expect(modelTone(adviceFor('Fix the bug in parser.py please', 'medium', 'claude-opus-5-5', 0))).toBe('yellow')
+})
+
+test('only the person\'s own origins are advised; wrapped engine text is dropped', () => {
+  expect(['composer', 'bridge', 'sdk'].every(isPersonOrigin)).toBe(true)
+  expect(['task-notification', 'peer', 'plugin', 'unclassified', 'auto-continuation', 'coordinator'].some(isPersonOrigin)).toBe(false)
+  expect(cleanPrompt('hi <system-reminder>think deeply</system-reminder>')).toBe('hi')
+  expect(advise('hi <ide_selection>' + 'x '.repeat(5000) + '</ide_selection>').model).toBe('haiku')
+})
+
+test('category icons', () => {
+  expect(['System prompt', 'System tools', 'MCP tools', 'Skills', 'Memory files', 'Messages'].map(categoryIcon).join('')).toBe('📜🔧🔌🧩🗂️💬')
 })

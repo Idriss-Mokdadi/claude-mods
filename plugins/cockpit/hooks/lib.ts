@@ -1,6 +1,6 @@
 // Pure logic of cockpit: no `$`, so the tests can call it directly.
 
-import type { Advice, AttrRow, Fit, Level, ModelPick, EffortPick } from '../types'
+import type { Advice, AttrRow, Fit, Level, ModelPick, EffortPick, Tone } from '../types'
 
 // ---------------------------------------------------------------------------
 // Prices. Copied from JohnnyVizz/claude-kit savvy-progress (MIT, see
@@ -64,8 +64,18 @@ const CODE = /```|\b(function|class|def|import|const|let|var|return|compile|buil
 const QUICK_PREFIX = /^\s*(short|quick|brief|tl;?dr|vite|court|bref)\b/i
 const FACTUAL = /^\s*(what|who|when|where|which|define|translate|how many|how much|is|are|does|do|can|qu['e]|quel(le)?s?|combien|traduis)\b/i
 
+// Text the engine or a host wraps around a prompt (reminders, IDE context,
+// command echoes) is not the person's words: it is dropped before classifying.
+const WRAPPERS = /<(system-reminder|ide_[a-z_]+|command-[a-z-]+|local-command-[a-z-]+|user-prompt-submit-hook|attachment)[^>]*>[\s\S]*?<\/\1>/gi
+
+export const cleanPrompt = (text: string): string => text.replace(WRAPPERS, ' ').trim()
+
+// The origins that are a person's own message: Enter at the prompt, the
+// Remote Control bridge, and the SDK host (the desktop app's local sessions).
+export const isPersonOrigin = (kind: string): boolean => kind === 'composer' || kind === 'bridge' || kind === 'sdk'
+
 export function advise(text: string): { model: ModelPick; effort: EffortPick; reason: string } {
-  const t = text.trim()
+  const t = cleanPrompt(text)
   const words = t ? t.split(/\s+/).length : 0
   const lines = t.split('\n').length
 
@@ -96,7 +106,30 @@ export function adviceFor(text: string, currentEffort: string | null, currentMod
 }
 
 // ---------------------------------------------------------------------------
-// Budget levels.
+// Budget levels and bar tones.
+
+export const toneOf = (pct: number, warn = 70, crit = 85): Tone => (pct > crit ? 'red' : pct >= warn ? 'orange' : pct >= 50 ? 'yellow' : 'green')
+
+const TONE_RANK: Record<Tone, number> = { green: 0, yellow: 1, orange: 2, red: 3 }
+export const worstTone = (tones: readonly Tone[]): Tone => tones.reduce<Tone>((w, t) => (TONE_RANK[t] > TONE_RANK[w] ? t : w), 'green')
+
+export const TONE_EMOJI: Record<Tone, string> = { green: '😊', yellow: '😐', orange: '😰', red: '😡' }
+export const TONE_COLOR: Record<Tone, string> = { green: '#3B9C5F', yellow: '#D9B21B', orange: '#E8833A', red: '#E5484D' }
+
+const FAMILY_RANK: Record<string, number> = { haiku: 0, sonnet: 1, opus: 2, fable: 2, mythos: 2 }
+
+// How well the current model and effort fit the advice: red when the effort is
+// two levels off or the model two tiers off (Haiku for a deep task, Opus for "hi").
+export function modelTone(a: Advice | null): Tone {
+  if (!a) return 'green'
+  const cur = FAMILY_RANK[familyOf(a.currentModel)]
+  const gap = cur === undefined ? 0 : Math.abs(cur - (FAMILY_RANK[a.model] ?? 1))
+  if (a.fit === 'red' || gap >= 2) return 'red'
+  if (a.fit === 'yellow' || gap === 1) return 'yellow'
+  return 'green'
+}
+
+export const effortRank = (e: string | null): number => (e ? EFFORTS.indexOf(e as EffortPick) : -1)
 
 export const levelOf = (pct: number, warn: number, crit: number): Level => (pct >= crit ? 'critical' : pct >= warn ? 'warning' : 'ok')
 
@@ -194,6 +227,13 @@ export const handoffName = (ms: number): string => {
   const d = new Date(ms)
   return `HANDOFF-${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}-${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}.md`
 }
+
+// "4:59 left" style: m:ss, or h:mm:ss past an hour.
+export const fmtLeft = (ms: number): string => fmtClock(Math.max(0, ms))
+
+// The /context category a breakdown row is, as an emoji.
+export const categoryIcon = (name: string): string =>
+  /system prompt/i.test(name) ? '📜' : /mcp/i.test(name) ? '🔌' : /system tools|built-?in|tools/i.test(name) ? '🔧' : /skill/i.test(name) ? '🧩' : /memory/i.test(name) ? '🗂️' : /message/i.test(name) ? '💬' : /agent/i.test(name) ? '🤖' : '📦'
 
 export const bar = (pct: number, width: number): string => {
   const filled = Math.max(0, Math.min(width, Math.round((width * pct) / 100)))

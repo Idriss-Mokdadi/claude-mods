@@ -1,30 +1,40 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, SessionMessage, SessionUsage, PluginOptions } from 'claude-code'
 
-import type { Advice, Cache, Handoff, Level, Limit, Mood, PaneData, Snapshot } from '../types'
+import type { Advice, Cache, Handoff, Level, Limit, Mood, PaneData, Snapshot, Tone } from '../types'
 import { CLAY, CRAB_CSS, crab, crabText } from './crab'
 import { STRINGS, fill, langOf } from './i18n'
 import type { Lang, Strings } from './i18n'
 import {
+  EFFORTS,
+  TONE_COLOR,
+  TONE_EMOJI,
   adviceFor,
   attribute,
   bar,
+  categoryIcon,
   costOf,
+  effortRank,
   familyOf,
   filesTouched,
-  fmtClock,
+  fitOf,
   fmtCost,
+  fmtLeft,
   fmtSpan,
   fmtTokens,
   handoffName,
+  isPersonOrigin,
   levelOf,
   modelName,
+  modelTone,
   pingCost,
+  toneOf,
   transcriptText,
+  worstTone,
 } from './lib'
 
-const P = 'cockpit'
 const PANE = 'cockpit-usage'
+const STORE_EXPANDED = 'cockpit.expanded'
 
 const snapshot = atom({ plugin: 'cockpit', key: 'snapshot' } as const, null, { shape: 'snap-1' })
 const advice = atom({ plugin: 'cockpit', key: 'advice' } as const, null, { shape: 'adv-1' })
@@ -34,6 +44,8 @@ const cache = atom({ plugin: 'cockpit', key: 'cache' } as const, { touchedAt: 0,
 const pane = atom({ plugin: 'cockpit', key: 'pane' } as const, null, { shape: 'pane-1' })
 const alerted = atom({ plugin: 'cockpit', key: 'alerted' } as const, 'ok')
 const handoff = atom({ plugin: 'cockpit', key: 'handoff' } as const, null, { shape: 'ho-1' })
+const expanded = atom({ plugin: 'cockpit', key: 'expanded' } as const, false)
+const showAll = atom({ plugin: 'cockpit', key: 'showAll' } as const, false)
 
 // ---------------------------------------------------------------------------
 // Settings.
@@ -45,6 +57,8 @@ type Opts = {
   keepAlive: boolean
   maxPings: number
   advisor: boolean
+  costBudget: number
+  debug: boolean
   language: string
 }
 
@@ -62,6 +76,8 @@ export const readOpts = (o: PluginOptions): Opts => {
     keepAlive: o.keepAlive === true,
     maxPings: Math.round(num(o.keepAliveMaxPings, 3, 0, 20)),
     advisor: o.advisor !== false,
+    costBudget: num(o.costBudgetUsd, 5, 0.01, 100_000),
+    debug: o.debug === true,
     language: typeof o.language === 'string' ? o.language : 'auto',
   }
 }
@@ -88,6 +104,47 @@ async function detectLang($: EngineInterface): Promise<Lang> {
   return langOf((await $.env.get('LC_ALL')) || (await $.env.get('LANG')) || '') ?? 'en'
 }
 
+const isLevel = (v: unknown): v is string => typeof v === 'string' && EFFORTS.includes(v.trim().toLowerCase() as never)
+
+// The active effort from every source that may hold it, first found wins:
+// the hook environment, the `/config` rows, the settings, the launch variable.
+async function readEffort($: EngineInterface): Promise<string | null> {
+  const env = await $.env.get('CLAUDE_EFFORT')
+  if (isLevel(env)) return env.trim().toLowerCase()
+  try {
+    const row = (await $.config.list()).find(r => /effort/i.test(r.key))
+    if (isLevel(row?.value)) return row.value.toLowerCase()
+  } catch {
+    // No config rows here.
+  }
+  try {
+    const v = await $.settings.read({ key: 'effortLevel' })
+    if (isLevel(v)) return v.toLowerCase()
+  } catch {
+    // No settings.
+  }
+  const launch = await $.env.get('CLAUDE_CODE_EFFORT_LEVEL')
+  return isLevel(launch) ? launch.trim().toLowerCase() : null
+}
+
+async function setEffort($: EngineInterface, level: string | null): Promise<void> {
+  if (!level || (await read($, effort)) === level) return
+  await update($, effort, () => level)
+  // Re-rate the advice shown against the new level.
+  await update($, advice, a => (a ? { ...a, currentEffort: level, ...fitOf(a.effort, level) } : a))
+}
+
+async function refreshModel($: EngineInterface): Promise<string> {
+  try {
+    model = (await $.session.model()) || model
+  } catch {
+    // Keep what we had.
+  }
+  const m = model
+  await update($, advice, a => (a && a.currentModel !== m ? { ...a, currentModel: m } : a))
+  return model
+}
+
 // ---------------------------------------------------------------------------
 // Readings.
 
@@ -106,7 +163,7 @@ const snapOf = (u: UsageLike, at: number): Snapshot => ({
 const limitOf = (s: Snapshot | null, kind: string): Limit | undefined => s?.limits.find(l => l.kind === kind)
 
 // The highest of context fill and the plan limits, and which one it is.
-export const budgetOf = (s: Snapshot | null): { pct: number; what: 'context' | 'five_hour' | 'seven_day' | string } => {
+export const budgetOf = (s: Snapshot | null): { pct: number; what: string } => {
   let pct = s?.contextPercent ?? 0
   let what = 'context'
   for (const l of s?.limits ?? []) if (l.percent > pct) ((pct = l.percent), (what = l.kind))
@@ -117,9 +174,6 @@ const whatWord = (what: string): string =>
   what === 'context' ? tr().context : what === 'five_hour' ? tr().fiveHour : what === 'seven_day' ? tr().sevenDay : what
 
 const rankOf = (l: Level): number => (l === 'critical' ? 2 : l === 'warning' ? 1 : 0)
-
-const LEVEL_COLOR: Record<Level, string> = { ok: '#3B9C5F', warning: '#D9A21B', critical: '#E5484D' }
-const FIT_COLOR = { green: '#3B9C5F', yellow: '#D9A21B', red: '#E5484D', unknown: '#9a9a96' } as const
 
 // The TTL in ms and whether it was guessed.
 const ttlOf = (c: Cache, s: Snapshot | null): { ms: number; isGuess: boolean } => {
@@ -238,7 +292,7 @@ export async function writeHandoff($: EngineInterface): Promise<string> {
       '',
     ].join('\n')
     await $.fs.write(`${cwd.replace(/\/$/, '')}/${rel}`, text)
-    await update($, handoff, () => ({ path: rel, at: at, isRunning: false, usd }))
+    await update($, handoff, () => ({ path: rel, at, isRunning: false, usd }))
     const done = fill(s.handoffDone, { path: rel })
     return r.isAnswered ? done : `${fill(s.handoffFallback, { why: r.reason })} ${done}`
   } catch (err) {
@@ -265,30 +319,66 @@ async function compactNow($: EngineInterface): Promise<void> {
   }
 }
 
-async function applyAdvice($: EngineInterface, a: Advice): Promise<void> {
+// ---------------------------------------------------------------------------
+// Switching model and effort. The `/config` "model" row is the direct way; the
+// `/model` command is the fallback. Either way the session's model is read
+// back, and the toast says so when it did not change.
+
+const isFamily = (id: string, family: string): boolean => familyOf(id) === family
+
+export async function switchTo($: EngineInterface, a: Advice): Promise<boolean> {
+  const s = tr()
+  const target = a.model
+  let names = new Set<string>()
   try {
-    const names = new Set((await $.command.list()).map(c => c.name))
-    if (!names.has('model')) throw new Error('no /model')
-    await $.command.run({ command: 'model', args: a.model })
-    if (names.has('effort')) await $.command.run({ command: 'effort', args: a.effort })
-    else throw new Error('no /effort')
-    $.ui.toast(fill(tr().switched, { model: a.model, effort: a.effort }))
+    names = new Set((await $.command.list()).map(c => c.name))
   } catch {
-    $.ui.toast(fill(tr().switchHint, { model: a.model, effort: a.effort }))
+    // No command list: the config row alone.
   }
+  if (!isFamily(await refreshModel($), target)) {
+    try {
+      const row = (await $.config.list()).find(r => r.key === 'model')
+      const opt = row?.options?.find(o => o.toLowerCase() === target) ?? row?.options?.find(o => isFamily(o, target))
+      if (row && !row.isLocked && opt) await $.config.set({ key: 'model', value: opt })
+    } catch {
+      // Fall through to the command.
+    }
+  }
+  if (!isFamily(await refreshModel($), target) && names.has('model')) {
+    try {
+      await $.command.run({ command: 'model', args: target })
+    } catch {
+      // Checked below.
+    }
+  }
+  const isModelOk = isFamily(await refreshModel($), target)
+  let isEffortOk = false
+  if (names.has('effort')) {
+    try {
+      await $.command.run({ command: 'effort', args: a.effort })
+      await setEffort($, a.effort)
+      isEffortOk = true
+    } catch {
+      // Hint below.
+    }
+  }
+  if (!isModelOk) $.ui.toast(fill(s.modelNotChanged, { model: target }))
+  else if (!isEffortOk) $.ui.toast(fill(s.switchHint, { model: target, effort: a.effort }))
+  else $.ui.toast(fill(s.switched, { model: target, effort: a.effort }))
+  return isModelOk
 }
 
 // ---------------------------------------------------------------------------
-// Usage pane data.
+// Context breakdown and the per-tool estimate.
 
 const shortPath = (p: string): string => p.split('/').slice(-2).join('/')
 
-export async function refreshPane($: EngineInterface): Promise<void> {
+export async function refreshData($: EngineInterface, detail: 'full' | 'summary'): Promise<void> {
   const at = await $.clock.now()
   try {
     let u: SessionUsage
     try {
-      u = await $.session.usage({ breakdown: 'full', columns: 80 })
+      u = await $.session.usage({ breakdown: detail, columns: 80 })
     } catch {
       u = await $.session.usage({ breakdown: 'summary', columns: 80 })
     }
@@ -300,13 +390,13 @@ export async function refreshPane($: EngineInterface): Promise<void> {
     const servers = new Map<string, number>()
     for (const t of bd?.mcpTools ?? []) servers.set(t.serverName, (servers.get(t.serverName) ?? 0) + t.tokens)
     const data: PaneData = {
-      rows: (bd?.categories ?? []).filter(c => c.kind !== 'deferred').map(c => ({ name: c.name, tokens: c.tokens, kind: c.kind })),
+      rows: (bd?.categories ?? []).filter(c => c.kind === 'used').map(c => ({ name: c.name, tokens: c.tokens, kind: c.kind })),
       total: bd?.totalTokens ?? u.context.tokens ?? 0,
       max: bd?.rawMaxTokens ?? u.context.window,
-      mcpServers: [...servers].map(([name, tokens]) => ({ name, tokens })).sort((a, b) => b.tokens - a.tokens).slice(0, 6),
-      memory: (bd?.memoryFiles ?? []).map(m => ({ path: shortPath(m.path), tokens: m.tokens })).sort((a, b) => b.tokens - a.tokens).slice(0, 6),
-      skills: (bd?.skills?.skillFrontmatter ?? []).map(k => ({ name: k.name, tokens: k.tokens })).sort((a, b) => b.tokens - a.tokens).slice(0, 6),
-      attribution: attr.rows.slice(0, 10),
+      mcpServers: [...servers].map(([name, tokens]) => ({ name, tokens })).sort((a, b) => b.tokens - a.tokens),
+      memory: (bd?.memoryFiles ?? []).map(m => ({ path: shortPath(m.path), tokens: m.tokens })).sort((a, b) => b.tokens - a.tokens),
+      skills: (bd?.skills?.skillFrontmatter ?? []).map(k => ({ name: k.name, tokens: k.tokens })).sort((a, b) => b.tokens - a.tokens),
+      attribution: attr.rows,
       userTokens: attr.userTokens,
       replyTokens: attr.replyTokens,
       at,
@@ -320,106 +410,49 @@ export async function refreshPane($: EngineInterface): Promise<void> {
   }
 }
 
+async function openPane($: EngineInterface): Promise<void> {
+  await $.ui.open({ id: PANE, title: tr().pane })
+  void refreshData($, 'full')
+}
+
 async function togglePane($: EngineInterface): Promise<boolean> {
-  const isOpen = (await $.ui.panes()).some(p => p.id === PANE)
-  if (isOpen) {
+  if ((await $.ui.panes()).some(p => p.id === PANE)) {
     await $.ui.close({ id: PANE })
     return false
   }
-  await update($, pane, () => null)
-  await $.ui.open({ id: PANE, title: tr().pane })
-  void refreshPane($)
+  await openPane($)
   return true
 }
 
-// ---------------------------------------------------------------------------
-// Drawing helpers (desktop and mobile: SVG; terminal: text rows).
-
-const FONT = "-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',sans-serif"
-const xml = (s: string): string => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] ?? c)
-
-// Rough advance of UI text in em (from savvy-progress, MIT).
-const charEm = (ch: string): number => (/[\s.,:;'|!il1()[\]]/.test(ch) ? 0.3 : /[A-Z@%]/.test(ch) ? 0.72 : 0.56)
-const textWidth = (s: string, size: number): number => [...s].reduce((w, ch) => w + charEm(ch) * size * 1.12, 0)
-
-const CSS = `<style>.t{fill:#1f1f1f}.s{fill:#6b6b68}.k{fill:#e4e4e2}.tile{fill:#f4f3f0}
-@media (prefers-color-scheme: dark){.t{fill:#ececec}.s{fill:#a8a8a4}.k{fill:#2c2c2c}.tile{fill:#262625}}</style>`
-
-type Seg = { text: string; color?: string; dot?: string; bold?: boolean }
-
-const BAND_H = 28
-
-// One band row: the mood crab, then the segments, left to right (right to left in Arabic).
-const bandSvg = (W: number, mood: Mood, segs: Seg[], gauge: boolean): string => {
-  const rtl = isRtl()
-  const parts: string[] = []
-  let x = 36
-  for (const s of segs) {
-    if (s.text === '◔' && gauge) {
-      parts.push(crab(rtl ? W - x - 24 : x, 2, 'gauge', 0.8, rtl))
-      x += 28
-      continue
-    }
-    if (s.dot) {
-      parts.push(`<circle cx="${rtl ? W - x - 4 : x + 4}" cy="${BAND_H / 2}" r="4" fill="${s.dot}"/>`)
-      x += 11
-    }
-    const w = textWidth(s.text, 12.5)
-    const at = rtl ? `x="${W - x}" direction="rtl" text-anchor="start"` : `x="${x}"`
-    const fillAttr = s.color ? ` fill="${s.color}"` : ' class="t"'
-    parts.push(`<text ${at} y="${BAND_H / 2 + 4.5}" font-family="${FONT}" font-size="12.5"${s.bold ? ' font-weight="600"' : ''}${fillAttr}>${xml(s.text)}</text>`)
-    x += w + 16
+async function toggleBand($: EngineInterface): Promise<void> {
+  const isUp = await update($, expanded, v => !v)
+  try {
+    await $.store.set(STORE_EXPANDED, isUp)
+  } catch {
+    // Remembered for this session only.
   }
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${BAND_H}" viewBox="0 0 ${W} ${BAND_H}">${CSS}${CRAB_CSS}
-${crab(rtl ? W - 30 : 0, 1, mood, 0.95, rtl)}${parts.join('')}</svg>`
+  if (isUp) void refreshData($, 'summary')
 }
 
-type BarRow = { label: string; value: string; pct: number; color: string }
+// ---------------------------------------------------------------------------
+// Lines: every item is one line with an emoji label, a value, a bar and a mood.
 
-// A titled list of bars, one SVG per section.
-const sectionSvg = (W: number, title: string, rows: BarRow[]): string => {
-  const rtl = isRtl()
-  const H = 22 + rows.length * 30
-  const body = rows
-    .map((r, i) => {
-      const y = 22 + i * 30
-      const fw = Math.round((W * Math.max(0, Math.min(100, r.pct))) / 100)
-      const label = rtl ? `x="${W}" direction="rtl" text-anchor="start"` : 'x="0"'
-      const value = rtl ? 'x="0"' : `x="${W}" text-anchor="end"`
-      return `<text class="t" ${label} y="${y + 12}" font-family="${FONT}" font-size="12">${xml(r.label)}</text>
-<text class="s" ${value} y="${y + 12}" font-family="${FONT}" font-size="12" font-variant-numeric="tabular-nums">${xml(r.value)}</text>
-<rect class="k" x="0" y="${y + 18}" width="${W}" height="6" rx="3"/><rect x="${rtl ? W - fw : 0}" y="${y + 18}" width="${fw}" height="6" rx="3" fill="${r.color}"/>`
-    })
-    .join('')
-  const head = rtl ? `x="${W}" direction="rtl" text-anchor="start"` : 'x="0"'
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${CSS}
-<text class="t" ${head} y="14" font-family="${FONT}" font-size="13" font-weight="600">${xml(title)}</text>${body}</svg>`
+type Line = {
+  key: string
+  crab?: Mood
+  emoji: string
+  label: string
+  value: string
+  pct: number
+  tone: Tone | null
+  color?: string
+  end?: string
+  marker?: number
 }
 
-const headerSvg = (W: number, mood: Mood, tiles: [string, string][]): string => {
-  const rtl = isRtl()
-  const gap = 6
-  const x0 = 40
-  const tw = (W - x0 - gap * (tiles.length - 1)) / Math.max(1, tiles.length)
-  const body = tiles
-    .map(([k, v], i) => {
-      const x = rtl ? W - x0 - (i + 1) * tw - i * gap : x0 + i * (tw + gap)
-      const tx = rtl ? `x="${x + tw - 8}" direction="rtl" text-anchor="start"` : `x="${x + 8}"`
-      return `<rect class="tile" x="${x}" y="0" width="${tw}" height="40" rx="8"/>
-<text class="s" ${tx} y="15" font-family="${FONT}" font-size="11">${xml(k)}</text>
-<text class="t" ${rtl ? `x="${x + tw - 8}" text-anchor="end"` : `x="${x + 8}"`} y="32" font-family="${FONT}" font-size="14" font-weight="600" font-variant-numeric="tabular-nums">${xml(v)}</text>`
-    })
-    .join('')
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="40" viewBox="0 0 ${W} 40">${CSS}${CRAB_CSS}${crab(rtl ? W - 33 : 0, 6, mood, 1.1, rtl)}${body}</svg>`
-}
+const NEUTRAL = '#378ADD'
 
-const moodOf = (level: Level, h: Handoff | null, a: Advice | null, at: number): Mood => {
-  if (h && (h.isRunning || at - h.at < 60_000)) return 'suitcase'
-  if (level === 'critical') return 'alarm'
-  if (level === 'warning') return 'sweat'
-  if (a && at - a.at < 120_000) return 'gauge'
-  return 'calm'
-}
+const crabFor = (t: Tone): Mood => (t === 'red' ? 'angry' : t === 'orange' ? 'sweat' : t === 'yellow' ? 'calm' : 'happy')
 
 const fitWord = (a: Advice): string => {
   const s = tr()
@@ -431,12 +464,153 @@ const fitWord = (a: Advice): string => {
 
 const resetIn = (l: Limit | undefined, at: number): string => (l?.resetsAt ? fmtSpan(Date.parse(l.resetsAt) - at) : '')
 
-const pctColor = (pct: number): string => LEVEL_COLOR[levelOf(pct, opts.warn, opts.crit)]
-
-async function ttlHook($: EngineInterface, e: { cache_ttl?: string }): Promise<void> {
-  const ttl: Cache['detectedTtl'] = e.cache_ttl === '1h' ? '1h' : e.cache_ttl === '5m' ? '5m' : null
-  if (ttl) await update($, cache, c => ({ ...c, detectedTtl: ttl }))
+type View = {
+  status: Line[]
+  model: Line
+  advice: Advice | null
+  worst: Tone
+  mood: Mood
+  level: Level
 }
+
+async function viewOf($: EngineInterface): Promise<View> {
+  const s = tr()
+  const snap = await read($, snapshot)
+  const a = opts.advisor ? await read($, advice) : null
+  const c = await read($, cache)
+  const ho = await read($, handoff)
+  const cur = await read($, effort)
+  const at = Math.max(await read($, now), snap?.at ?? 0)
+  const w = opts.warn
+  const k = opts.crit
+  const lines: Line[] = []
+
+  const ctx = snap?.contextPercent
+  const ctxTone = toneOf(ctx ?? 0, w, k)
+  lines.push({
+    key: 'ctx',
+    crab: crabFor(ctxTone),
+    emoji: '🧠',
+    label: s.lineContext,
+    value: ctx === null || ctx === undefined ? s.noReading : `${Math.round(ctx)}% · ${fmtTokens(snap?.contextTokens ?? 0)} / ${fmtTokens(snap?.window ?? 0)}`,
+    pct: ctx ?? 0,
+    tone: ctx === null || ctx === undefined ? null : ctxTone,
+  })
+  for (const [kind, emoji, label] of [
+    ['five_hour', '⏱️', s.lineFive],
+    ['seven_day', '📅', s.lineSeven],
+  ] as const) {
+    const l = limitOf(snap, kind)
+    if (!l) continue
+    const t = toneOf(l.percent, w, k)
+    const reset = resetIn(l, at)
+    lines.push({ key: kind, crab: crabFor(t), emoji, label, value: `${Math.round(l.percent)}%${reset ? ` · ${s.resetsIn} ${reset}` : ''}`, pct: l.percent, tone: t })
+  }
+  if (snap?.costUsd !== null && snap?.costUsd !== undefined) {
+    const pct = (snap.costUsd / opts.costBudget) * 100
+    const t = toneOf(pct, w, k)
+    const extra = c.pingUsd ? ` · ${s.pings} ≈${fmtCost(c.pingUsd)}` : ''
+    lines.push({ key: 'cost', crab: crabFor(t), emoji: '💵', label: s.lineCost, value: `${fmtCost(snap.costUsd)} ${fill(s.ofBudget, { usd: fmtCost(opts.costBudget) })}${extra}`, pct, tone: t })
+  }
+  const ttl = ttlOf(c, snap)
+  const idle = c.touchedAt ? at - c.touchedAt : 0
+  if (!c.touchedAt) {
+    lines.push({ key: 'cache', crab: 'calm', emoji: '🧊', label: s.lineCache, value: s.noCache, pct: 0, tone: null, end: '' })
+  } else if (idle >= ttl.ms) {
+    lines.push({ key: 'cache', crab: 'sleep', emoji: '🧊', label: s.lineCache, value: s.cold, pct: 0, tone: null, end: '😴' })
+  } else {
+    const leftPct = ((ttl.ms - idle) / ttl.ms) * 100
+    const t = toneOf(100 - leftPct, w, k)
+    const ping = opts.keepAlive ? ` · ${s.ping} ${c.pings}/${opts.maxPings} ${fill(s.pingCost, { usd: fmtCost(pingCost(model, snap?.contextTokens ?? 0)) })}` : ''
+    lines.push({
+      key: 'cache',
+      crab: crabFor(t),
+      emoji: '🧊',
+      label: s.lineCache,
+      value: `${fmtLeft(ttl.ms - idle)} ${s.left}${ttl.isGuess ? ' (?)' : ''}${ping}`,
+      pct: leftPct,
+      tone: t,
+      color: TONE_COLOR[t],
+    })
+  }
+
+  const mt = modelTone(a)
+  const curName = modelName(a?.currentModel || model)
+  const modelLine: Line = a
+    ? {
+        key: 'model',
+        crab: mt === 'red' ? 'angry' : 'gauge',
+        emoji: '🤖',
+        label: s.lineModel,
+        value: `${s.now}: ${curName} · ${cur ?? '?'} → ${s.suggest} ${a.model} · ${a.effort} · ${fitWord(a)}`,
+        pct: ((effortRank(cur) + 1) / EFFORTS.length) * 100,
+        marker: ((effortRank(a.effort) + 1) / EFFORTS.length) * 100,
+        tone: mt,
+      }
+    : { key: 'model', crab: 'gauge', emoji: '🤖', label: s.lineModel, value: `${s.now}: ${curName} · ${cur ?? '?'} · ${s.noAdvice}`, pct: ((effortRank(cur) + 1) / EFFORTS.length) * 100, tone: null }
+  if (opts.advisor) lines.push(modelLine)
+
+  const { pct } = budgetOf(snap)
+  const level = levelOf(pct, w, k)
+  const worst = worstTone(lines.flatMap(l => (l.tone && l.key !== 'cache' ? [l.tone] : [])))
+  const mood: Mood = ho && (ho.isRunning || at - ho.at < 60_000) ? 'suitcase' : crabFor(worst)
+  return { status: lines, model: modelLine, advice: a, worst, mood, level }
+}
+
+const breakdownLines = (d: PaneData | null): Line[] => {
+  if (!d) return []
+  const max = Math.max(1, d.max)
+  return d.rows.map((r, i) => ({
+    key: `cat-${i}`,
+    emoji: categoryIcon(r.name),
+    label: r.name,
+    value: `${fmtTokens(r.tokens)} · ${Math.round((r.tokens / max) * 100)}%`,
+    pct: (r.tokens / max) * 100,
+    tone: null,
+  }))
+}
+
+const KIND_EMOJI = { tool: '🔧', mcp: '🔌', skill: '🧩', agent: '🦀' } as const
+
+const attrLines = (d: PaneData | null, limit: number): Line[] => {
+  if (!d) return []
+  const total = Math.max(1, d.attribution.reduce((n, r) => n + r.tokens, 0) + d.userTokens + d.replyTokens)
+  return d.attribution.slice(0, limit).map((r, i) => ({
+    key: `attr-${i}`,
+    emoji: KIND_EMOJI[r.kind],
+    label: r.key.replace(/^mcp__/, ''),
+    value: `≈${fmtTokens(r.tokens)} · ${r.calls} ${tr().calls}`,
+    pct: (r.tokens / total) * 100,
+    tone: null,
+  }))
+}
+
+const listLines = (prefix: string, emoji: string, list: { name: string; tokens: number }[]): Line[] => {
+  const top = Math.max(1, ...list.map(x => x.tokens))
+  return list.map((x, i) => ({ key: `${prefix}-${i}`, emoji, label: x.name, value: fmtTokens(x.tokens), pct: (x.tokens / top) * 100, tone: null }))
+}
+
+// ---------------------------------------------------------------------------
+// SVG pieces (desktop and mobile). Text stays in Text elements, which wrap; SVG
+// draws only the crabs and the bars, so nothing is ever cut.
+
+const crabSvg = (mood: Mood, size = 22): string =>
+  `<svg xmlns="http://www.w3.org/2000/svg" width="${Math.round(size * 1.08)}" height="${size}" viewBox="0 0 30 28">${CRAB_CSS}${crab(0, 0, mood, 1, isRtl())}</svg>`
+
+const barSvg = (W: number, pct: number, color: string, marker?: number): string => {
+  const rtl = isRtl()
+  const fw = Math.round((W * Math.max(0, Math.min(100, pct))) / 100)
+  const mk = marker === undefined ? '' : (() => {
+    const x = Math.max(0, Math.min(W - 3, Math.round((W * marker) / 100) - 2))
+    return `<rect class="mk" x="${rtl ? W - x - 3 : x}" y="0" width="3" height="10" rx="1"/>`
+  })()
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="10" viewBox="0 0 ${W} 10"><style>.k{fill:#e4e4e2}.mk{fill:#1f1f1f}@media (prefers-color-scheme: dark){.k{fill:#3a3a38}.mk{fill:#ececec}}</style>
+<rect class="k" x="0" y="2" width="${W}" height="6" rx="3"/><rect x="${rtl ? W - fw : 0}" y="2" width="${fw}" height="6" rx="3" fill="${color}"/>${mk}</svg>`
+}
+
+const lineColor = (l: Line): string => l.color ?? (l.tone ? TONE_COLOR[l.tone] : NEUTRAL)
+const lineEnd = (l: Line): string => l.end ?? (l.tone ? TONE_EMOJI[l.tone] : '')
+const altOf = (l: Line): string => `${l.label}: ${l.value}`
 
 // ---------------------------------------------------------------------------
 
@@ -446,15 +620,16 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     lang = await detectLang($)
-    try {
-      model = await $.session.model()
-    } catch {
-      model = ''
-    }
-    await $.command.register({ name: 'usage-panel', description: 'Show or hide the cockpit usage panel: limits, cost, context by category, per-tool estimate' })
+    await refreshModel($)
+    await $.command.register({ name: 'usage-panel', description: 'Show or hide the cockpit usage panel: limits, cost, cache, model fit and what uses your tokens' })
     await $.command.register({ name: 'handoff', description: 'Write a handoff note to handoff/HANDOFF-<date>.md for a fresh session (one cheap Haiku call)' })
-    const envEffort = (await $.env.get('CLAUDE_EFFORT')) || (await $.env.get('CLAUDE_CODE_EFFORT_LEVEL'))
-    if (envEffort && (await read($, effort)) === null) await update($, effort, () => envEffort)
+    await setEffort($, await readEffort($))
+    try {
+      const was = await $.store.get(STORE_EXPANDED)
+      if (typeof was === 'boolean') await update($, expanded, () => was)
+    } catch {
+      // Collapsed by default.
+    }
     try {
       await measure($, await $.session.usage())
     } catch {
@@ -478,17 +653,17 @@ export const register: Register = (on, options) => {
   })
 
   on('turn.start', async ($, e, next) => {
-    if (!e.agentId && !isPinging) isBusy = true
+    if (!e.agentId && !isPinging) {
+      isBusy = true
+      if ((await read($, effort)) === null) await setEffort($, await readEffort($))
+    }
     return next(e)
   })
 
   on('turn.step', async function* ($, e, next) {
     if (!e.agentId && !isPinging) {
       model = e.model || model
-      if (typeof e.effort === 'string') {
-        const level = e.effort
-        if ((await read($, effort)) !== level) await update($, effort, () => level)
-      }
+      if (typeof e.effort === 'string') await setEffort($, e.effort)
     }
     return yield* next(e)
   })
@@ -499,23 +674,49 @@ export const register: Register = (on, options) => {
       const at = await $.clock.now()
       await update($, cache, c => ({ ...c, touchedAt: at, pings: 0 }))
       await update($, now, () => at)
+      if ((await read($, expanded)) || (await read($, pane)) !== null) void refreshData($, 'summary')
     }
     return next(e)
   })
 
   // The engine reports the prompt-cache TTL on a model switch.
   on('classic.PreModelSwitch', async ($, e, next) => (await ttlHook($, e), next(e)))
-  on('classic.PostModelSwitch', async ($, e, next) => (await ttlHook($, e), next(e)))
+  on('classic.PostModelSwitch', async ($, e, next) => {
+    await ttlHook($, e)
+    model = e.to_model || model
+    return next(e)
+  })
   // The active effort, where a classic hook carries it.
   on('classic.Stop', async ($, e, next) => {
-    const level = e.effort?.level
-    if (level && !e.agent_id) await update($, effort, () => level)
+    if (!e.agent_id) await setEffort($, e.effort?.level ?? null)
     return next(e)
+  })
+  on('classic.PostToolUse', async ($, e, next) => {
+    if (!e.agent_id) await setEffort($, e.effort?.level ?? null)
+    return next(e)
+  })
+
+  // After /effort or /model, read the new values back.
+  on('command.run', { command: 'effort' }, async ($, e, next) => {
+    const r = await next(e)
+    const arg = e.args.trim().toLowerCase()
+    await setEffort($, isLevel(arg) ? arg : await readEffort($))
+    return r
+  })
+  on('command.run', { command: 'model' }, async ($, e, next) => {
+    const r = await next(e)
+    await refreshModel($)
+    return r
   })
 
   on('prompt.submit', async ($, e, next) => {
     // Never touches the prompt: it reads the text and passes `e` on unchanged.
-    if (opts.advisor && !e.command && !e.isMeta && e.text.trim()) {
+    // Only the person's own message counts: not a command, a hidden prompt, a
+    // notification, a peer's message or a plugin's.
+    const text = e.text.trim()
+    const isPerson = isPersonOrigin(e.origin.kind) && !e.command && !e.isMeta && text !== '' && !text.startsWith('/')
+    if (opts.debug) $.ui.log(`cockpit: prompt.submit origin=${e.origin.kind} length=${e.text.length} advised=${opts.advisor && isPerson}`)
+    if (opts.advisor && isPerson) {
       const at = await $.clock.now()
       const a = adviceFor(e.text, await read($, effort), model, at)
       await update($, advice, () => a)
@@ -525,9 +726,7 @@ export const register: Register = (on, options) => {
 
   on('command.run', { command: 'usage-panel' }, async ($, e) => {
     if ((e.args ?? '').trim() === 'open') {
-      await update($, pane, () => null)
-      await $.ui.open({ id: PANE, title: tr().pane })
-      void refreshPane($)
+      await openPane($)
       return { text: tr().opened }
     }
     return { text: (await togglePane($)) ? tr().opened : tr().closed }
@@ -536,233 +735,177 @@ export const register: Register = (on, options) => {
   on('command.run', { command: 'handoff' }, async $ => ({ text: await writeHandoff($) }))
 
   // -------------------------------------------------------------------------
+  // Drawing.
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const s = tr()
-    const ui = $.ui.resolve(e)
-    const { Box, Text, Button } = ui
-    const snap = await read($, snapshot)
+    const ui = $.ui.resolve(e) as unknown as UI
+    const v = await viewOf($)
     const data = await read($, pane)
-    const c = await read($, cache)
-    const ho = await read($, handoff)
-    const at = Math.max(await read($, now), snap?.at ?? 0)
-    const { pct } = budgetOf(snap)
-    const level = levelOf(pct, opts.warn, opts.crit)
-    const mood = moodOf(level, ho, null, at)
-    const five = limitOf(snap, 'five_hour')
-    const seven = limitOf(snap, 'seven_day')
-    const others = (snap?.limits ?? []).filter(l => l.kind !== 'five_hour' && l.kind !== 'seven_day')
-    const ctxPct = snap?.contextPercent ?? 0
-    const cost = snap?.costUsd
-
-    const limitRows: BarRow[] = [
-      ...(five ? [{ label: s.fiveHour, value: `${Math.round(five.percent)}% · ${s.resetsIn} ${resetIn(five, at)}`, pct: five.percent, color: pctColor(five.percent) }] : []),
-      ...(seven ? [{ label: s.sevenDay, value: `${Math.round(seven.percent)}% · ${s.resetsIn} ${resetIn(seven, at)}`, pct: seven.percent, color: pctColor(seven.percent) }] : []),
-      ...others.map(l => ({ label: l.kind, value: `${Math.round(l.percent)}%`, pct: l.percent, color: pctColor(l.percent) })),
-    ]
-    const ctxRow: BarRow = {
-      label: `${s.context} · ${modelName(snap?.model || model)}`,
-      value: `${Math.round(ctxPct)}% · ${fmtTokens(snap?.contextTokens ?? 0)} / ${fmtTokens(snap?.window ?? 0)}`,
-      pct: ctxPct,
-      color: pctColor(ctxPct),
-    }
-    const max = Math.max(1, data?.max ?? 1)
-    const catRows: BarRow[] = (data?.rows ?? []).map(r => ({
-      label: r.name,
-      value: `${fmtTokens(r.tokens)} · ${Math.round((r.tokens / max) * 100)}%`,
-      pct: (r.tokens / max) * 100,
-      color: r.kind === 'used' ? '#8f8cf4' : '#b4b4b0',
-    }))
-    const listRows = (list: { name: string; tokens: number }[]): BarRow[] => {
-      const top = Math.max(1, ...list.map(x => x.tokens))
-      return list.map(x => ({ label: x.name, value: fmtTokens(x.tokens), pct: (x.tokens / top) * 100, color: '#378ADD' }))
-    }
-    const attrTotal = Math.max(1, (data?.attribution ?? []).reduce((n, r) => n + r.tokens, 0) + (data?.userTokens ?? 0) + (data?.replyTokens ?? 0))
-    const attrRows: BarRow[] = [
-      ...(data?.attribution ?? []).map(r => ({
-        label: `${r.kind === 'tool' ? '' : r.kind + ': '}${r.key.replace(/^mcp__/, '')}`,
-        value: `≈${fmtTokens(r.tokens)} · ${r.calls} ${s.calls}`,
-        pct: (r.tokens / attrTotal) * 100,
-        color: r.kind === 'skill' ? '#1D9E75' : r.kind === 'agent' ? '#D85A30' : r.kind === 'mcp' ? '#BA7517' : '#378ADD',
-      })),
-      ...(data ? [
-        { label: s.userTokens, value: `≈${fmtTokens(data.userTokens)}`, pct: (data.userTokens / attrTotal) * 100, color: '#888780' },
-        { label: s.replyTokens, value: `≈${fmtTokens(data.replyTokens)}`, pct: (data.replyTokens / attrTotal) * 100, color: '#888780' },
-      ] : []),
-    ]
-    const tiles: [string, string][] = [
-      [s.cost, cost === null || cost === undefined ? '—' : fmtCost(cost)],
-      [s.context, `${Math.round(ctxPct)}%`],
-      [s.h5, five ? `${Math.round(five.percent)}%` : '—'],
-      [s.d7, seven ? `${Math.round(seven.percent)}%` : '—'],
-    ]
-    const extra = [c.pings || c.pingUsd ? `${s.pings}: ${c.pings} · ≈${fmtCost(c.pingUsd)}` : '', ho?.path && ho.usd ? `${s.handoff}: ≈${fmtCost(ho.usd)}` : '']
-      .filter(Boolean)
-      .join(' · ')
-    const refresh = <Button key="refresh" label={s.refresh} plain onPress={() => refreshPane($)} />
-    const sections: [string, string, BarRow[]][] = [
-      ['limits', s.limits, limitRows],
-      ['ctx', s.session, [ctxRow]],
-      ['cat', s.breakdown, catRows],
-      ['mcp', s.mcpBy, listRows(data?.mcpServers ?? [])],
-      ['mem', s.memory, listRows((data?.memory ?? []).map(m => ({ name: m.path, tokens: m.tokens })))],
-      ['skills', s.skills, listRows(data?.skills ?? [])],
-      ['attr', `${s.attribution} (${s.estimate})`, attrRows],
-    ]
-    const align = isRtl() ? 'flex-end' : undefined
-
-    if (e.surface !== 'terminal' && 'Svg' in ui) {
-      const { Svg } = ui
-      const W = Math.max(240, Math.min(900, (e.props.bodyColumns || 40) * 8 - 8))
-      return (
-        <Box flexDirection="column" gap={1} alignItems={align}>
-          <Svg source={headerSvg(W, mood, tiles)} alt={tiles.map(t => `${t[0]} ${t[1]}`).join(', ')} width={W} height={40} />
-          {extra ? <Text dimColor>{extra}</Text> : null}
-          {limitRows.length === 0 && <Text dimColor>{s.noLimits}</Text>}
-          {data === null && <Text dimColor>{s.loading}</Text>}
-          {data?.error ? <Text color="red">{data.error}</Text> : null}
-          {sections
-            .filter(([, , rows]) => rows.length > 0)
-            .map(([key, title, rows]) => (
-              <Svg key={key} source={sectionSvg(W, title, rows)} alt={`${title}: ${rows.map(r => `${r.label} ${r.value}`).join('; ')}`} width={W} height={22 + rows.length * 30} />
-            ))}
-          {data ? <Text dimColor>{s.estimateNote}</Text> : null}
-          {refresh}
-        </Box>
-      )
-    }
-
-    const cols = Math.max(24, e.props.bodyColumns || 40)
-    const barW = Math.max(6, Math.min(24, cols - 30))
-    const row = (r: BarRow, i: number) => (
-      <Box key={`${r.label}-${i}`} flexDirection="column">
-        <Text wrap="truncate-end">
-          {r.label} <Text dimColor>{r.value}</Text>
-        </Text>
-        <Text color={r.color}>{bar(r.pct, barW)}</Text>
-      </Box>
-    )
+    const all = await read($, showAll)
+    const size = sizeOf(e.props.bodyColumns, e.surface !== 'terminal' && 'Svg' in ui)
+    const { Box, Text, Button } = ui
+    const switchBtn = switchButton(ui, $, v)
+    const more: Line[] = all && data
+      ? [
+          ...listLines('mcp', '🔌', data.mcpServers),
+          ...listLines('mem', '🗂️', data.memory.map(m => ({ name: m.path, tokens: m.tokens }))),
+          ...listLines('skill', '🧩', data.skills),
+        ]
+      : []
     return (
-      <Box flexDirection="column" alignItems={align}>
-        <Text>
-          <Text color={CLAY}>{crabText(mood)}</Text> {tiles.map(t => `${t[0]} ${t[1]}`).join(' · ')}
-        </Text>
-        {extra ? <Text dimColor>{extra}</Text> : null}
-        {limitRows.length === 0 && <Text dimColor>{s.noLimits}</Text>}
-        {data === null && <Text dimColor>{s.loading}</Text>}
+      <Box flexDirection="column" alignItems={isRtl() ? 'flex-end' : undefined}>
+        {header(ui, $, v, size, false)}
+        {v.status.map(l => lineEl(ui, l, size, l.key === 'model' ? switchBtn : null))}
+        {guardButtons(ui, $, v)}
+        <Text bold>🔎 {s.whatUses}</Text>
+        {data === null ? <Text dimColor>{s.loading}</Text> : null}
         {data?.error ? <Text color="red">{data.error}</Text> : null}
-        {sections
-          .filter(([, , rows]) => rows.length > 0)
-          .map(([key, title, rows]) => (
-            <Box key={key} flexDirection="column" marginTop={1}>
-              <Text bold>{title}</Text>
-              {rows.map(row)}
-            </Box>
-          ))}
+        {breakdownLines(data).map(l => lineEl(ui, l, size))}
         {data ? (
-          <Box marginTop={1}>
-            <Text dimColor>{s.estimateNote}</Text>
-          </Box>
+          <Text bold>
+            🏆 {s.topUsers} <Text dimColor>({s.estimate})</Text>
+          </Text>
         ) : null}
-        {refresh}
+        {attrLines(data, all ? 1000 : 5).map(l => lineEl(ui, l, size))}
+        {all && data
+          ? [
+              lineEl(ui, { key: 'you', emoji: '🙋', label: s.userTokens, value: `≈${fmtTokens(data.userTokens)}`, pct: 0, tone: null }, size),
+              lineEl(ui, { key: 'reply', emoji: '💬', label: s.replyTokens, value: `≈${fmtTokens(data.replyTokens)}`, pct: 0, tone: null }, size),
+            ]
+          : null}
+        {more.length ? <Text bold>📚 {s.mcpBy} · {s.memory} · {s.skills}</Text> : null}
+        {more.map(l => lineEl(ui, l, size))}
+        <Box flexDirection="row" gap={1} flexWrap="wrap">
+          <Button key="refresh" label={`🔄 ${s.refresh}`} plain onPress={() => refreshData($, 'full')} />
+          <Button key="show-all" label={all ? `▴ ${s.showLess}` : `▾ ${s.showAll}`} plain onPress={() => update($, showAll, x => !x)} />
+        </Box>
+        {data ? <Text dimColor>{s.estimateNote}</Text> : null}
       </Box>
     )
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
-    // Draw with the other mods' bands beneath; the engine's placeholder is never nested.
+    // Draw with the other mods' bands; the engine's placeholder is never nested.
     const drawn = await Promise.resolve(next(e)).catch(() => null)
     const below = drawn && typeof drawn === 'object' && (drawn as { type?: string }).type !== 'engine' ? drawn : null
-
     const s = tr()
-    const ui = $.ui.resolve(e)
-    const { Box, Text, Button } = ui
-    const snap = await read($, snapshot)
-    const a = opts.advisor ? await read($, advice) : null
-    const c = await read($, cache)
-    const ho = await read($, handoff)
-    const at = Math.max(await read($, now), snap?.at ?? 0)
-    const { pct } = budgetOf(snap)
-    const level = levelOf(pct, opts.warn, opts.crit)
-    const mood = moodOf(level, ho, a, at)
-    const five = limitOf(snap, 'five_hour')
-    const seven = limitOf(snap, 'seven_day')
-    const ctxPct = snap?.contextPercent
+    const ui = $.ui.resolve(e) as unknown as UI
+    const { Box, Text } = ui
+    const v = await viewOf($)
+    const isUp = await read($, expanded)
+    const size = sizeOf(e.props.bodyColumns, e.surface !== 'terminal' && 'Svg' in ui)
 
-    const ttl = ttlOf(c, snap)
-    const idle = c.touchedAt ? at - c.touchedAt : 0
-    const cacheText = !c.touchedAt
-      ? ''
-      : idle >= ttl.ms
-        ? s.cacheCold
-        : `${s.cache} ${fmtClock(idle)}/${fmtClock(ttl.ms)}${ttl.isGuess ? '?' : ''}`
-    const pingText = opts.keepAlive && c.touchedAt ? `${s.ping} ${c.pings}/${opts.maxPings} ${fill(s.pingCost, { usd: fmtCost(pingCost(model, snap?.contextTokens ?? 0)) })}` : ''
-
-    const segs: Seg[] = [
-      { text: `${s.ctx} ${ctxPct === null || ctxPct === undefined ? '—' : Math.round(ctxPct) + '%'}`, color: ctxPct ? pctColor(ctxPct) : undefined, bold: level !== 'ok' },
-      ...(five ? [{ text: `${s.h5} ${Math.round(five.percent)}% · ${resetIn(five, at)}`, color: pctColor(five.percent) }] : []),
-      ...(seven ? [{ text: `${s.d7} ${Math.round(seven.percent)}%`, color: pctColor(seven.percent) }] : []),
-      ...(snap?.costUsd !== null && snap?.costUsd !== undefined ? [{ text: fmtCost(snap.costUsd) }] : []),
-      ...(cacheText ? [{ text: cacheText, color: idle >= ttl.ms ? '#9a9a96' : undefined }] : []),
-      ...(pingText ? [{ text: pingText, color: '#9a9a96' }] : []),
-      ...(a
-        ? [
-            { text: '◔' },
-            { text: `${s.suggest} ${a.model} · ${a.effort}`, bold: familyOf(a.currentModel) !== a.model },
-            { text: fitWord(a), dot: FIT_COLOR[a.fit], color: FIT_COLOR[a.fit] },
-          ]
-        : []),
-    ]
-    const alt = segs.filter(x => x.text !== '◔').map(x => x.text).join(' · ')
-    const isMismatch = a !== null && (a.fit === 'yellow' || a.fit === 'red' || (familyOf(a.currentModel) !== '' && familyOf(a.currentModel) !== a.model))
-
-    const buttons = [
-      <Button key="cockpit-usage" label={s.usage} plain onPress={() => void togglePane($)} />,
-      ...(isMismatch && a ? [<Button key="cockpit-switch" label={`${s.apply} ${a.model}·${a.effort}`} plain onPress={() => applyAdvice($, a)} />] : []),
-      ...(level === 'critical'
-        ? [
-            <Button key="cockpit-compact" label={s.compact} variant="primary" onPress={() => compactNow($)} />,
-            <Button key="cockpit-handoff" label={s.handoff} onPress={() => runHandoff($)} />,
-          ]
-        : []),
-    ]
-
-    if (e.surface !== 'terminal' && 'Svg' in ui) {
-      const { Svg } = ui
-      const room = buttons.length * 90 + 16
-      const W = Math.max(200, Math.min(1400, (e.props.bodyColumns || 100) * 8 - room))
+    if (!isUp) {
+      // Collapsed: one small button; the other mods' bands sit beside it.
       return (
-        <Box flexDirection="column">
-          <Box flexDirection={isRtl() ? 'row-reverse' : 'row'} alignItems="center" gap={1}>
-            <Svg source={bandSvg(W, mood, segs, true)} alt={alt} width={W} height={BAND_H} />
-            {buttons}
-          </Box>
-          {below}
+        <Box flexDirection={isRtl() ? 'row-reverse' : 'row'} gap={1} flexWrap="wrap" alignItems="center">
+          {header(ui, $, v, size, true)}
+          {below as never}
         </Box>
       )
     }
-
+    const data = await read($, pane)
     return (
       <Box flexDirection="column">
-        <Box flexDirection={isRtl() ? 'row-reverse' : 'row'} gap={1}>
-          <Text color={level === 'ok' ? CLAY : LEVEL_COLOR[level]}>{crabText(mood)}</Text>
-          {segs.map((x, i) =>
-            x.text === '◔' ? (
-              <Text key={`s${i}`} color={CLAY}>
-                ◔
-              </Text>
-            ) : (
-              <Text key={`s${i}`} color={x.color} bold={x.bold} wrap="truncate-end">
-                {x.dot ? '● ' : ''}
-                {x.text}
-              </Text>
-            ),
-          )}
-          {buttons}
-        </Box>
-        {below}
+        {header(ui, $, v, size, true)}
+        {v.status.map(l => lineEl(ui, l, size, l.key === 'model' ? switchButton(ui, $, v) : null))}
+        {guardButtons(ui, $, v)}
+        <Text bold>🔎 {s.whatUses}</Text>
+        {data === null ? <Text dimColor>{s.loading}</Text> : null}
+        {breakdownLines(data).map(l => lineEl(ui, l, size))}
+        {data && data.attribution.length ? (
+          <Text bold>
+            🏆 {s.topUsers} <Text dimColor>({s.estimate})</Text>
+          </Text>
+        ) : null}
+        {attrLines(data, 5).map(l => lineEl(ui, l, size))}
+        {below as never}
       </Box>
     )
   })
+}
+
+// ---------------------------------------------------------------------------
+// Element builders. The element table differs per surface; these take it whole.
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type El = any
+type UI = { Box: El; Text: El; Button: El; Svg?: El }
+type Size = { W: number; barW: number; isSvg: boolean }
+
+const sizeOf = (columns: number, isSvg: boolean): Size => {
+  const cols = Math.max(20, columns || 60)
+  return { W: Math.max(140, Math.min(720, cols * 8 - 24)), barW: Math.max(8, Math.min(30, cols - 6)), isSvg }
+}
+
+const crabEl = (ui: UI, mood: Mood, size: Size, tone: Tone | null = null) => {
+  const { Svg, Text } = ui
+  if (size.isSvg && Svg) return <Svg source={crabSvg(mood)} alt={`crab: ${mood}`} width={24} height={22} />
+  return <Text color={tone === 'red' ? TONE_COLOR.red : CLAY}>{crabText(mood)}</Text>
+}
+
+function lineEl(ui: UI, l: Line, size: Size, extra: unknown = null) {
+  const { Box, Text, Svg } = ui
+  const end = lineEnd(l)
+  return (
+    <Box key={l.key} flexDirection="column" marginBottom={size.isSvg ? 0 : 1}>
+      <Box flexDirection={isRtl() ? 'row-reverse' : 'row'} gap={1} alignItems="center">
+        {l.crab ? <Box flexShrink={0}>{crabEl(ui, l.crab, size, l.tone)}</Box> : null}
+        <Box flexShrink={1}>
+          <Text>
+            {l.emoji} <Text bold>{l.label}</Text> <Text color={l.tone ? TONE_COLOR[l.tone] : undefined}>{l.value}</Text>
+            {end ? ` ${end}` : ''}
+          </Text>
+        </Box>
+      </Box>
+      {extra ? (
+        <Box flexDirection="row" flexWrap="wrap">
+          {extra as never}
+        </Box>
+      ) : null}
+      {size.isSvg && Svg ? (
+        <Svg source={barSvg(size.W, l.pct, lineColor(l), l.marker)} alt={altOf(l)} width={size.W} height={10} />
+      ) : (
+        <Text color={lineColor(l)}>{bar(l.pct, size.barW)}</Text>
+      )}
+    </Box>
+  )
+}
+
+function header($ui: UI, $: EngineInterface, v: View, size: Size, isBand: boolean) {
+  const { Box, Button, Text } = $ui
+  const s = tr()
+  const label = `${size.isSvg ? '' : crabText(v.mood) + ' '}📊 ${s.bandUsage} ${TONE_EMOJI[v.worst]}`
+  return (
+    <Box key="cockpit-head" flexDirection={isRtl() ? 'row-reverse' : 'row'} gap={1} alignItems="center" flexWrap="wrap">
+      {size.isSvg ? crabEl($ui, v.mood, size) : null}
+      {isBand ? <Button key="cockpit-usage" label={label} plain onPress={() => toggleBand($)} /> : <Text bold>{label}</Text>}
+    </Box>
+  )
+}
+
+function guardButtons(ui: UI, $: EngineInterface, v: View) {
+  const { Box, Button } = ui
+  const s = tr()
+  return (
+    <Box key="cockpit-guard" flexDirection="row" gap={1} flexWrap="wrap">
+      {v.level === 'critical' ? <Button key="cockpit-compact" label={`🗜️ ${s.compact}`} variant="primary" onPress={() => compactNow($)} /> : null}
+      {v.level === 'critical' ? <Button key="cockpit-handoff" label={`🧳 ${s.handoff}`} onPress={() => runHandoff($)} /> : null}
+      <Button key="cockpit-full" label={`📋 ${s.fullList}`} plain onPress={() => openPane($)} />
+    </Box>
+  )
+}
+
+function switchButton(ui: UI, $: EngineInterface, v: View) {
+  const { Button } = ui
+  const a = v.advice
+  if (!a || modelTone(a) === 'green') return null
+  return <Button key="cockpit-switch" label={`🔀 ${tr().apply} → ${a.model} · ${a.effort}`} plain onPress={() => switchTo($, a)} />
+}
+
+async function ttlHook($: EngineInterface, e: { cache_ttl?: string }): Promise<void> {
+  const ttl: Cache['detectedTtl'] = e.cache_ttl === '1h' ? '1h' : e.cache_ttl === '5m' ? '5m' : null
+  if (ttl) await update($, cache, c => ({ ...c, detectedTtl: ttl }))
 }

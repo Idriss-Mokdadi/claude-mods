@@ -1,6 +1,6 @@
 // Pixel crab, copied from JohnnyVizz/claude-kit savvy-progress (MIT, see
 // THIRD_PARTY_NOTICES.md): body, legs, the stamp helper and the CSS motion.
-// The mood props (sweat, alarm, suitcase, gauge) are cockpit's own, drawn the same way.
+// The mood props (happy, sweat, angry, sleep, suitcase, gauge) are cockpit's own, drawn the same way.
 
 import type { Mood } from '../types'
 
@@ -12,17 +12,21 @@ type Fill = (x: number, y: number, w: number, h: number, c: string, cls?: string
 const stamp = (f: Fill, x: number, y: number, rows: string[], map: Record<string, string>, cls?: string): void =>
   rows.forEach((row, dy) => [...row].forEach((ch, dx) => map[ch] && f(x + dx, y + dy, 1, 1, map[ch] ?? '', cls)))
 
-const crabBody = (f: Fill, armFront = 0, armCls?: string, eyes = INK): void => {
-  f(7, 10, 16, 12, CLAY)
-  f(3, 14, 4, 4, CLAY)
-  f(23, 14 + armFront, 4, 4, CLAY, armCls)
-  f(9, 12, 2, 2, eyes)
-  f(19, 12, 2, 2, eyes)
-  f(7, 22, 2, 4, CLAY, 'la')
-  f(17, 22, 2, 4, CLAY, 'la')
-  f(11, 22, 2, 4, CLAY, 'lb')
-  f(21, 22, 2, 4, CLAY, 'lb')
+const crabBody = (f: Fill, armFront = 0, armCls?: string, body = CLAY, eyes = true): void => {
+  f(7, 10, 16, 12, body)
+  f(3, 14, 4, 4, body)
+  f(23, 14 + armFront, 4, 4, body, armCls)
+  if (eyes) {
+    f(9, 12, 2, 2, INK)
+    f(19, 12, 2, 2, INK)
+  }
+  f(7, 22, 2, 4, body, 'la')
+  f(17, 22, 2, 4, body, 'la')
+  f(11, 22, 2, 4, body, 'lb')
+  f(21, 22, 2, 4, body, 'lb')
 }
+
+const ANGRY = '#E5484D'
 
 // Pure CSS, run by the compositor. Every motion stops under prefers-reduced-motion.
 export const CRAB_CSS = `<style>
@@ -35,8 +39,11 @@ export const CRAB_CSS = `<style>
 @keyframes drip{0%{transform:translateY(0);opacity:1}100%{transform:translateY(4px);opacity:0}}
 .m-sweat .bd{animation:shake .25s steps(1) infinite}
 @keyframes shake{50%{transform:translateX(1px)}}
-.m-alarm .al{animation:blink .4s steps(1) infinite}.m-alarm .ray{animation:blink .4s steps(1) infinite -.2s}
-.m-alarm .bd{animation:bob .2s steps(1) infinite}
+.m-happy .bd{animation:hop 1s steps(1) infinite}.m-happy .hr{animation:blink 1s steps(1) infinite}
+@keyframes hop{50%{transform:translateY(-1px)}}
+.m-angry .st{animation:blink .4s steps(1) infinite}.m-angry .st2{animation:blink .4s steps(1) infinite -.2s}
+.m-angry .bd{animation:shake .2s steps(1) infinite}
+.m-sleep .z1{animation:blink 2s steps(1) infinite}.m-sleep .z2{animation:blink 2s steps(1) infinite -1s}
 @keyframes blink{50%{opacity:.15}}
 .m-suitcase .la{animation:st .5s steps(1) infinite}.m-suitcase .lb{animation:st .5s steps(1) infinite -.25s}
 .m-suitcase .it{animation:bob .5s steps(1) infinite}
@@ -55,17 +62,32 @@ const MOODS: Record<Mood, (f: Fill) => void> = {
     f(25, 6, 1, 2, '#5BB4F0', 'sw2')
     f(13, 16, 4, 1, INK)
   },
-  // Critical: a red siren on the head, both claws up.
-  alarm: f => {
-    crabBody(f, -6)
-    f(3, 8, 4, 4, CLAY)
-    f(12, 8, 6, 2, '#8E929A')
-    f(13, 4, 4, 4, '#E5484D', 'al')
-    f(14, 5, 1, 1, '#FFB3B5', 'al')
-    f(10, 3, 2, 1, '#F5C542', 'ray')
-    f(18, 3, 2, 1, '#F5C542', 'ray')
-    f(14, 1, 2, 2, '#F5C542', 'ray')
-    f(13, 16, 4, 2, INK)
+  // Happy: a smile and a little heart.
+  happy: f => {
+    crabBody(f)
+    f(12, 16, 1, 1, INK)
+    f(13, 17, 4, 1, INK)
+    f(17, 16, 1, 1, INK)
+    stamp(f, 24, 4, ['h.h', 'hhh', '.h.'], { h: '#E5484D' }, 'hr')
+  },
+  // Critical or wrong model: red, frowning brows, steam puffs.
+  angry: f => {
+    crabBody(f, -4, undefined, ANGRY)
+    f(8, 10, 4, 1, INK)
+    f(18, 10, 4, 1, INK)
+    f(12, 18, 6, 1, INK)
+    f(12, 17, 1, 1, INK)
+    f(17, 17, 1, 1, INK)
+    stamp(f, 4, 4, ['.ss', 'ss.', '.ss'], { s: '#C9CCD2' }, 'st')
+    stamp(f, 23, 3, ['ss.', '.ss', 'ss.'], { s: '#C9CCD2' }, 'st2')
+  },
+  // Cache cold: eyes shut, Zz floating up.
+  sleep: f => {
+    crabBody(f, 0, undefined, CLAY, false)
+    f(9, 13, 2, 1, INK)
+    f(19, 13, 2, 1, INK)
+    stamp(f, 22, 4, ['zzz', '..z', '.z.', 'zzz'], { z: '#8E929A' }, 'z1')
+    stamp(f, 26, 0, ['zz', '.z', 'zz'], { z: '#8E929A' }, 'z2')
   },
   // Handoff: walking off with a suitcase.
   suitcase: f => {
@@ -97,4 +119,4 @@ export const crab = (x: number, y: number, mood: Mood, scale = 0.8, mirror = fal
 
 // The terminal's crab: a glyph and a mood mark.
 export const crabText = (mood: Mood): string =>
-  ({ calm: '▣', sweat: "▣'", alarm: '▣!', suitcase: '▣▤', gauge: '▣◔' })[mood]
+  ({ happy: '▣♥', calm: '▣', sweat: "▣'", angry: '▣!', sleep: '▣z', suitcase: '▣▤', gauge: '▣◔' })[mood]
