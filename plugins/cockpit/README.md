@@ -29,7 +29,15 @@ Bar colours: green under 50%, yellow 50-70%, orange 70-85%, red over 85%.
 
 ## Features
 
-1. **Model and effort advisor.** Keyword and length rules (no model call, zero tokens) on the person's own prompts only: Enter at the prompt, Remote Control, or the desktop app's host. Notifications, peer messages, slash commands, hidden prompts and engine-wrapped text (`<system-reminder>`, IDE context) are ignored. Suggests Haiku/low (short, factual, "short/quick/brief"), Sonnet/medium (normal coding or writing), Opus/high ("think deeply", architecture, multi-step debugging, long pasted documents). The prompt text is never changed.
+1. **Model and effort advisor.** A scored classifier, zero tokens, on the person's own prompts only (Enter at the prompt, Remote Control, the desktop app's host; never notifications, peer messages, slash commands, hidden prompts or engine-wrapped text). Signals in English, French and Arabic, matched by word stem so plurals and inflections count (bug/bugs, analyse/analysing/analysis):
+   - complexity (complex, complicated, difficult, hard, tricky, advanced · complexe, difficile · معقد، صعب) and deep thinking (think deeply, ultrathink, in-depth · réfléchis en profondeur · فكر بعمق);
+   - scope (app, project, codebase, architecture, whole/entire, many files, large), workload (a lot of, many, several · beaucoup de · الكثير من);
+   - task type (bugs/errors/crash, stack traces, analysis/review/audit, refactor/migrate/design, security/performance/concurrency, build/implement, code);
+   - intensifiers just before a signal (too, very, really, so · trop, très · جدا after it) add points;
+   - down-signals: short/quick/brief, greetings, simple questions (what is, translate, define), small edits (typo, rename);
+   - size: pasted code, long text, long documents.
+
+   The score maps to six tiers: Haiku·low, Sonnet·low, Sonnet·medium, Sonnet·high, Opus·high, Opus·xhigh (xhigh only when deep thinking is asked on a strong score). A short follow-up ("yes", "ok do it", "continue", "next", "oui", "نعم") keeps the tier of the task it follows for up to 5 prompts; a clearly new small task ends it. The model line shows **why** (the top three reasons, in the UI language), for example `why: complex · many bugs · whole app`. The prompt text is never changed. Optional **AI check** (`advisorAi`, off by default): for a score in the middle band only, one Haiku call at low effort gives a second opinion; its cost shows on the line.
 2. **Switch.** Sets the model through the `/config` model row, falls back to `/model`, then reads the session's model back; if it did not change, a toast says "Model not changed: pick <model> in the model menu". Effort is set with `/effort`.
 3. **Active effort** is read from `CLAUDE_EFFORT`, the `/config` rows, the `effortLevel` setting, `CLAUDE_CODE_EFFORT_LEVEL`, each model request and the classic hooks, and again after `/effort` or `/model`.
 4. **Budget guard.** Toast at the warning level (70%), Compact now and Handoff past the critical level (85%), over context and plan limits.
@@ -51,6 +59,7 @@ Bar colours: green under 50%, yellow 50-70%, orange 70-85%, red over 85%.
 | `criticalPercent` | 85 | Critical level, percent. |
 | `costBudgetUsd` | 5 | The cost bar is full at this amount. |
 | `advisor` | true | Show the model/effort advisor. |
+| `advisorAi` | false | One Haiku check when the rule score is ambiguous (costs a little per check). |
 | `cacheTtl` | auto | `auto`, `5m` or `1h`. |
 | `keepAlive` | false | Ping the cache before it expires. |
 | `keepAliveMaxPings` | 3 | Most pings between two of your turns. |

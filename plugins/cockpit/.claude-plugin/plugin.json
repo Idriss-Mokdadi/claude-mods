@@ -1,6 +1,6 @@
 {
   "name": "cockpit",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Usage cockpit: one small Usage button above the prompt that expands to one line per item (context, 5h and 7d limits, cost, cache, model fit) with progress bars, pixel crab icons whose mood follows each bar and what uses your tokens; a free model and effort advisor; a budget guard with Compact and Handoff; /handoff notes; /usage-panel.",
   "author": {
     "name": "Mohamed Idriss Mokdadi",
@@ -30,8 +30,14 @@
     "advisor": {
       "type": "boolean",
       "title": "Model and effort advisor",
-      "description": "Suggest a model and effort for each prompt with free keyword rules (no model call)",
+      "description": "Suggest a model and effort for each prompt with a free scored classifier (no model call): English, French and Arabic signals, sticky for follow-ups",
       "default": true
+    },
+    "advisorAi": {
+      "type": "boolean",
+      "title": "Advisor: AI check when unsure",
+      "description": "Off by default. When on and the rule score is ambiguous, one Haiku call at low effort classifies the prompt; its cost shows on the model line",
+      "default": false
     },
     "cacheTtl": {
       "type": "string",

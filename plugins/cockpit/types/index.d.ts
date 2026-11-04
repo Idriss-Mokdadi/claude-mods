@@ -22,6 +22,15 @@ export type Advice = {
   model: ModelPick
   effort: EffortPick
   reason: string
+  // The signals behind it (advisor.ts SignalId), strongest first.
+  why: string[]
+  // 0 haiku·low … 5 opus·xhigh, and the score that gave it.
+  tier: number
+  score: number
+  // The task context a short follow-up keeps.
+  sticky: { tier: number; left: number; why: string[] } | null
+  // Set when the optional AI check answered: what it cost.
+  aiUsd?: number
   fit: Fit
   dir: 'high' | 'low' | ''
   currentEffort: string | null

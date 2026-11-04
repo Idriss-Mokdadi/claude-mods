@@ -4,6 +4,8 @@ import type { EngineInterface, Register, SessionMessage, SessionUsage, PluginOpt
 import type { Advice, Cache, Handoff, Level, Limit, Mood, PaneData, Snapshot, Tone } from '../types'
 import { CLAY, CRAB_CSS, crab, crabText } from './crab'
 import { crabIcon, iconWidth } from './crab-icons'
+import { AI_PROMPT, TIERS, isAmbiguous, tierFromLabel, whyText } from './advisor'
+import type { Sticky } from './advisor'
 import type { IconKind } from './crab-icons'
 import { STRINGS, fill, langOf } from './i18n'
 import type { Lang, Strings } from './i18n'
@@ -59,6 +61,7 @@ type Opts = {
   keepAlive: boolean
   maxPings: number
   advisor: boolean
+  advisorAi: boolean
   costBudget: number
   debug: boolean
   language: string
@@ -78,6 +81,7 @@ export const readOpts = (o: PluginOptions): Opts => {
     keepAlive: o.keepAlive === true,
     maxPings: Math.round(num(o.keepAliveMaxPings, 3, 0, 20)),
     advisor: o.advisor !== false,
+    advisorAi: o.advisorAi === true,
     costBudget: num(o.costBudgetUsd, 5, 0.01, 100_000),
     debug: o.debug === true,
     language: typeof o.language === 'string' ? o.language : 'auto',
@@ -550,7 +554,7 @@ async function viewOf($: EngineInterface): Promise<View> {
         emoji: '🤖',
         icon: 'model',
         label: s.lineModel,
-        value: `${s.now}: ${curName} · ${cur ?? '?'} → ${s.suggest} ${a.model} · ${a.effort} · ${fitWord(a)}`,
+        value: `${s.now}: ${curName} · ${cur ?? '?'} → ${s.suggest} ${a.model} · ${a.effort} · ${fitWord(a)}${a.why?.length ? ` · ${s.why}: ${whyText(a.why, lang)}` : ''}${a.aiUsd !== undefined ? ` · ${fill(s.aiCost, { usd: fmtCost(a.aiUsd) })}` : ''}`,
         pct: ((effortRank(cur) + 1) / EFFORTS.length) * 100,
         marker: ((effortRank(a.effort) + 1) / EFFORTS.length) * 100,
         tone: mt,
@@ -733,8 +737,10 @@ export const register: Register = (on, options) => {
     if (opts.debug) $.ui.log(`cockpit: prompt.submit origin=${e.origin.kind} length=${e.text.length} advised=${opts.advisor && isPerson}`)
     if (opts.advisor && isPerson) {
       const at = await $.clock.now()
-      const a = adviceFor(e.text, await read($, effort), model, at)
+      const prev = ((await read($, advice))?.sticky ?? null) as Sticky | null
+      const a = adviceFor(e.text, await read($, effort), model, at, prev)
       await update($, advice, () => a)
+      if (opts.advisorAi && isAmbiguous(a) && !a.why.includes('follow')) void aiCheck($, e.text, at)
     }
     return next(e)
   })
@@ -954,6 +960,22 @@ function switchButton(ui: UI, $: EngineInterface, v: View, size: Size) {
   const a = v.advice
   if (!a || modelTone(a) === 'green') return null
   return <Button key="cockpit-switch" label={`${size.isSvg ? '' : '🔀 '}${tr().apply} → ${a.model} · ${a.effort}`} plain onPress={() => switchTo($, a)} />
+}
+
+// The optional AI check (off by default): one Haiku call at low effort, only for
+// a score in the ambiguous middle. Its answer replaces the rule's tier; what it
+// cost is shown on the model line.
+async function aiCheck($: EngineInterface, text: string, at: number): Promise<void> {
+  const r = await $.model.complete({ model: 'haiku', effort: 'low', maxTokens: 8, timeoutMs: 20_000, prompt: AI_PROMPT(text) })
+  const usd = costOf('haiku', r.usage)
+  const tier = r.isAnswered ? tierFromLabel(r.text) : null
+  const cur = await read($, effort)
+  await update($, advice, a => {
+    if (!a || a.at !== at) return a
+    if (tier === null) return { ...a, aiUsd: usd }
+    const t = TIERS[tier] ?? TIERS[2] ?? { model: a.model, effort: a.effort }
+    return { ...a, model: t.model, effort: t.effort, tier, why: ['ai', ...a.why], aiUsd: usd, ...fitOf(t.effort, cur) }
+  })
 }
 
 async function ttlHook($: EngineInterface, e: { cache_ttl?: string }): Promise<void> {

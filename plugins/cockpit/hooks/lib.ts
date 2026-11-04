@@ -1,6 +1,8 @@
 // Pure logic of cockpit: no `$`, so the tests can call it directly.
 
 import type { Advice, AttrRow, Fit, Level, ModelPick, EffortPick, Tone } from '../types'
+import { TIERS, adviseInContext, scorePrompt, whyText } from './advisor'
+import type { Sticky } from './advisor'
 
 // ---------------------------------------------------------------------------
 // Prices. Copied from JohnnyVizz/claude-kit savvy-progress (MIT, see
@@ -57,36 +59,17 @@ export const pingCost = (model: string, contextTokens: number): number =>
 export const EFFORTS: readonly EffortPick[] = ['low', 'medium', 'high', 'xhigh', 'max']
 const rank = (e: string): number => EFFORTS.indexOf(e as EffortPick)
 
-const DEEP =
-  /\b(think (deeply|hard|carefully)|ultrathink|deep(ly)? (dive|analysis)|architect(ure)?|system design|design (a|the|an) (system|architecture|protocol)|refactor(ing)? (the|a|whole|entire)|migrat(e|ion)|root cause|race condition|deadlock|memory leak|multi-?step|step[- ]by[- ]step|trade-?offs?|prove|proof|security (audit|review)|threat model|optimi[sz]e (the|a) (algorithm|pipeline)|réfléchis|architecture|analyse approfondie)\b/i
-const DEBUG = /\b(debug|stack ?trace|traceback|segfault|exception|crash(es|ing)?|flaky|regression|fails? (only|sometimes|intermittently))\b/i
-const CODE = /```|\b(function|class|def|import|const|let|var|return|compile|build|test|refactor|implement|fix|bug|api|endpoint|script|code|regex|sql|kotlin|python|typescript|javascript|rust|c\+\+)\b|[{};]\s*$/im
-const QUICK_PREFIX = /^\s*(short|quick|brief|tl;?dr|vite|court|bref)\b/i
-const FACTUAL = /^\s*(what|who|when|where|which|define|translate|how many|how much|is|are|does|do|can|qu['e]|quel(le)?s?|combien|traduis)\b/i
-
-// Text the engine or a host wraps around a prompt (reminders, IDE context,
-// command echoes) is not the person's words: it is dropped before classifying.
-const WRAPPERS = /<(system-reminder|ide_[a-z_]+|command-[a-z-]+|local-command-[a-z-]+|user-prompt-submit-hook|attachment)[^>]*>[\s\S]*?<\/\1>/gi
-
-export const cleanPrompt = (text: string): string => text.replace(WRAPPERS, ' ').trim()
+// The classifier itself lives in advisor.ts; these keep the older entry points.
+export { cleanPrompt } from './advisor'
 
 // The origins that are a person's own message: Enter at the prompt, the
 // Remote Control bridge, and the SDK host (the desktop app's local sessions).
 export const isPersonOrigin = (kind: string): boolean => kind === 'composer' || kind === 'bridge' || kind === 'sdk'
 
 export function advise(text: string): { model: ModelPick; effort: EffortPick; reason: string } {
-  const t = cleanPrompt(text)
-  const words = t ? t.split(/\s+/).length : 0
-  const lines = t.split('\n').length
-
-  if (QUICK_PREFIX.test(t)) return { model: 'haiku', effort: 'low', reason: 'asked for a short answer' }
-  if (t.length > 6000 || lines > 150) return { model: 'opus', effort: 'high', reason: 'long pasted document' }
-  if (DEEP.test(t)) return { model: 'opus', effort: 'high', reason: 'deep reasoning asked' }
-  if (DEBUG.test(t) && (words > 40 || lines > 8)) return { model: 'opus', effort: 'high', reason: 'multi-step debugging' }
-  if (CODE.test(t)) return { model: 'sonnet', effort: 'medium', reason: 'coding task' }
-  if (words <= 15 && FACTUAL.test(t)) return { model: 'haiku', effort: 'low', reason: 'short factual question' }
-  if (words <= 6) return { model: 'haiku', effort: 'low', reason: 'very short prompt' }
-  return { model: 'sonnet', effort: 'medium', reason: 'normal writing or coding' }
+  const s = scorePrompt(text)
+  const t = TIERS[s.tier] ?? { model: 'sonnet', effort: 'medium' }
+  return { model: t.model, effort: t.effort, reason: whyText(s.why, 'en') }
 }
 
 // green: fits; yellow: one level off; red: two or more. `dir` says which way.
@@ -99,10 +82,25 @@ export function fitOf(suggested: EffortPick, current: string | null): { fit: Fit
   return { fit: 'red', dir }
 }
 
-export function adviceFor(text: string, currentEffort: string | null, currentModel: string, at: number): Advice {
-  const a = advise(text)
-  const f = fitOf(a.effort, currentEffort)
-  return { ...a, fit: f.fit, dir: f.dir, currentEffort, currentModel, at }
+// The advice for a prompt, in the context of the task before it (`prev`).
+export function adviceFor(text: string, currentEffort: string | null, currentModel: string, at: number, prev: Sticky | null = null): Advice {
+  const r = adviseInContext(text, prev)
+  const t = TIERS[r.tier] ?? { model: 'sonnet', effort: 'medium' }
+  const f = fitOf(t.effort, currentEffort)
+  return {
+    model: t.model,
+    effort: t.effort,
+    reason: whyText(r.why, 'en'),
+    why: r.why,
+    tier: r.tier,
+    score: r.score,
+    sticky: r.sticky,
+    fit: f.fit,
+    dir: f.dir,
+    currentEffort,
+    currentModel,
+    at,
+  }
 }
 
 // ---------------------------------------------------------------------------

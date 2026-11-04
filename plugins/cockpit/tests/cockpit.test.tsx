@@ -453,3 +453,33 @@ test('desktop: at the critical level the guard buttons carry the compact and han
   expect((await ui.find({ key: 'cockpit-compact' }) as unknown as { props: { label: string } }).props.label).toBe('Compact now')
   await ui.unmount()
 })
+
+test('advisor: the owner\'s complex prompt gets opus · high with its reasons, and "yes" keeps it', async ($, on) => {
+  await start($, on)
+  await submit($, 'i have a too complex app that needs a lot of analysing and a lot of coding knowledge and that has a lot of bugs so help me in it')
+  const ui = await band($, 'terminal')
+  await ui.press({ key: 'cockpit-usage' })
+  expect(await ui.find({ type: 'Text', text: /try opus · high · fits · why: complex · many bugs · whole app/ })).toBeDefined()
+  await submit($, 'yes')
+  expect(await ui.find({ type: 'Text', text: /try opus · high · fits · why: follow-up of the task/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('advisor: the AI check is off by default', async ($, on) => {
+  const { w } = await start($, on)
+  await submit($, 'debug why the login API returns 500 errors for some users and review the auth code')
+  expect(w.completes).toBe(0)
+})
+
+test('advisor: with advisorAi on, an ambiguous prompt gets one Haiku check and its cost shows', { options: { advisorAi: true } }, async ($, on) => {
+  const { w, clock } = await start($, on)
+  await submit($, 'hi')
+  expect(w.completes).toBe(0)
+  await submit($, 'debug why the login API returns 500 errors for some users and review the auth code')
+  await clock.settle()
+  expect(w.completes).toBe(1)
+  const ui = await band($, 'terminal')
+  await ui.press({ key: 'cockpit-usage' })
+  expect(await ui.find({ type: 'Text', text: /AI check ≈\$0\.00/ })).toBeDefined()
+  await ui.unmount()
+})

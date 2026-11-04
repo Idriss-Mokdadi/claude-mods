@@ -4,6 +4,8 @@ export type Lang = 'en' | 'fr' | 'ar'
 
 const en = {
   bandUsage: 'Usage',
+  why: 'why',
+  aiCost: 'AI check ≈{usd}',
   lineContext: 'Context',
   lineFive: '5-hour limit',
   lineSeven: '7-day limit',
@@ -83,6 +85,8 @@ export type Strings = typeof en
 
 const fr: Strings = {
   bandUsage: 'Conso',
+  why: 'pourquoi',
+  aiCost: 'vérif. IA ≈{usd}',
   lineContext: 'Contexte',
   lineFive: 'Limite 5 heures',
   lineSeven: 'Limite 7 jours',
@@ -160,6 +164,8 @@ const fr: Strings = {
 
 const ar: Strings = {
   bandUsage: 'الاستهلاك',
+  why: 'السبب',
+  aiCost: 'فحص الذكاء الاصطناعي ≈{usd}',
   lineContext: 'السياق',
   lineFive: 'حد 5 ساعات',
   lineSeven: 'حد 7 أيام',
