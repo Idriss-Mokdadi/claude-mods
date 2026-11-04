@@ -1,0 +1,41 @@
+{
+  "name": "savvy-progress-plus",
+  "version": "2.0.0",
+  "description": "Progress bar above the prompt for any multi-step work (savvy-flow, the task list, 2+ subagents), plus a crew panel (/crew): running, finished and planned subagents with model, effort fit, budget warnings, cost and time. Fork of savvy-progress.",
+  "author": {
+    "name": "Mohamed Idriss Mokdadi",
+    "url": "https://github.com/Idriss-Mokdadi"
+  },
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "language": {
+      "type": "string",
+      "title": "Panel language",
+      "description": "auto follows Claude Code's language setting, then the system locale; en, fr, ru, he or ar (Hebrew and Arabic are drawn right to left)",
+      "default": "auto",
+      "options": ["auto", "en", "fr", "ru", "he", "ar"]
+    },
+    "autoOpen": {
+      "type": "string",
+      "title": "Open the crew panel",
+      "description": "savvy: when a savvy-flow worker starts or a plan is reported; any: also when any other subagent starts",
+      "default": "savvy",
+      "options": ["savvy", "any"]
+    },
+    "budgetTokens": {
+      "type": "number",
+      "title": "Token budget per subagent",
+      "description": "A subagent past this many tokens turns red and raises a toast; 0 turns the check off",
+      "default": 0
+    },
+    "budgetUsd": {
+      "type": "number",
+      "title": "Cost budget per subagent (USD)",
+      "description": "A subagent past this estimated cost turns red and raises a toast; 0 turns the check off",
+      "default": 0
+    }
+  },
+  "homepage": "https://github.com/Idriss-Mokdadi/claude-mods/tree/main/plugins/savvy-progress-plus",
+  "repository": "https://github.com/Idriss-Mokdadi/claude-mods",
+  "license": "MIT"
+}
