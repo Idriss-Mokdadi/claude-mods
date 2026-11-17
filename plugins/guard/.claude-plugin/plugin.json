@@ -1,0 +1,74 @@
+{
+  "name": "guard",
+  "version": "0.1.0",
+  "description": "Guard: asks before destructive commands (rm -rf on broad paths, force push, git reset --hard, dd, mkfs, curl|sh, del /s, Remove-Item -Recurse -Force, DROP TABLE...), blocks real-looking secrets from being written or echoed, and checkpoints every file Claude edits, with /undo and a /checkpoints timeline. Hooks only: no model calls.",
+  "author": {
+    "name": "Mohamed Idriss Mokdadi",
+    "url": "https://github.com/Idriss-Mokdadi"
+  },
+  "license": "MIT",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "dangerGuard": {
+      "type": "boolean",
+      "title": "Danger guard",
+      "description": "Ask before destructive shell and PowerShell commands",
+      "default": true
+    },
+    "secretGuard": {
+      "type": "boolean",
+      "title": "Secret guard",
+      "description": "Block real-looking API keys, tokens, private keys and passwords from being written to files or put in commands",
+      "default": true
+    },
+    "checkpoints": {
+      "type": "boolean",
+      "title": "Checkpoints",
+      "description": "Snapshot each file before Claude edits it, into .claude/checkpoints/<session>/ in the project (git-ignored)",
+      "default": true
+    },
+    "allowList": {
+      "type": "string",
+      "title": "Allowed commands",
+      "description": "Comma-separated command prefixes the danger guard lets through (e.g. git push --force origin my-branch), or re:<regex>",
+      "default": ""
+    },
+    "secretAllowPaths": {
+      "type": "string",
+      "title": "Paths allowed to hold secrets",
+      "description": "Comma-separated globs where the secret guard does not look (e.g. tests/fixtures/**)",
+      "default": ""
+    },
+    "maxFiles": {
+      "type": "number",
+      "title": "Bulk delete: most files",
+      "description": "A delete naming more files than this is a bulk delete and asks first",
+      "default": 20
+    },
+    "maxFileKB": {
+      "type": "number",
+      "title": "Checkpoint: largest file (KB)",
+      "description": "Bigger files are listed but not saved",
+      "default": 512
+    },
+    "maxCheckpoints": {
+      "type": "number",
+      "title": "Checkpoints kept",
+      "description": "The oldest are overwritten past this count",
+      "default": 100
+    },
+    "maxSnapshotFiles": {
+      "type": "number",
+      "title": "Checkpoint: most files",
+      "description": "Most files one checkpoint saves (a destructive command on a folder)",
+      "default": 200
+    },
+    "language": {
+      "type": "string",
+      "title": "Language",
+      "description": "auto follows Claude Code's language setting, then the system locale; en, fr or ar (right to left)",
+      "default": "auto",
+      "options": ["auto", "en", "fr", "ar"]
+    }
+  }
+}
