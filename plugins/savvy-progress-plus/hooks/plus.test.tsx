@@ -7,7 +7,7 @@ import type { Engine } from 'claude-code/testing'
 
 const PLUGIN = 'savvy-progress-plus'
 const PROGRESS = 'mcp__savvy-progress-plus__progress'
-const band = (bodyColumns = 100) => ({ hasSurvey: false, isCollapsed: false, isWorking: false, maxRows: 4, bodyColumns, scroll: { offset: 0, bodyRows: 4 }, view: {} })
+const band = (bodyColumns = 100, isCollapsed = false) => ({ hasSurvey: false, isCollapsed, isWorking: false, maxRows: 4, bodyColumns, scroll: { offset: 0, bodyRows: 4 }, view: {} })
 const pane = (bodyColumns = 60) => ({ title: '', isFocused: false, bodyColumns, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} }) as const
 
 type Usage = { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number }
@@ -61,8 +61,8 @@ const finish = ($: Engine, agentId: string) =>
 
 const mine = (el: unknown): boolean => (el as { part?: { plugin?: string } }).part?.plugin !== 'test'
 
-const bandText = async ($: Engine, surface: 'terminal' | 'desktop' | 'mobile', columns = 100) => {
-  const ui = await $.ui.mount({ plugin: PLUGIN, surface, component: 'AbovePrompt', props: band(columns) })
+const bandText = async ($: Engine, surface: 'terminal' | 'desktop' | 'mobile', columns = 100, isCollapsed = false) => {
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface, component: 'AbovePrompt', props: band(columns, isCollapsed) })
   // Since Claude Code 2.1.326 the kit draws a stand-in band beneath, tagged with the
   // test's own part: only this mod's own elements are read.
   const svg = (await ui.findAll({ type: 'Svg' })).filter(mine)
@@ -440,4 +440,60 @@ test('rename: the command is /crew and the pane is crew, apart from the original
   expect(commands).toEqual(['crew'])
   expect(await $.command.run({ command: 'crew', args: 'open' } as never)).toMatchObject({ text: 'Crew panel opened.' })
   expect(opened).toEqual(['crew'])
+})
+
+// --- Collapsed band (isCollapsed, Claude Code 2.1.326) ---------------------
+
+for (const surface of ['terminal', 'desktop', 'mobile'] as const) {
+  test(`${surface}: collapsed, the band is one row: crab, title and count, no bar`, async ($, on) => {
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    await $.tool.call({ tool: PROGRESS, title: 'Ship it', phase: 'delegate', total: 4, done: 1 } as never)
+    const ui = await $.ui.mount({ plugin: PLUGIN, surface, component: 'AbovePrompt', props: band(42, true) })
+    const svgs = (await ui.findAll({ type: 'Svg' })).filter(mine)
+    const texts = (await ui.findAll({ type: 'Text' })).filter(mine).map(t => t.text ?? '')
+    if (surface === 'terminal') {
+      expect(svgs).toEqual([])
+      expect(texts).toEqual(['▣', 'Ship it', 'Tasks 1/4 · 25%'])
+    } else {
+      // One drawing, no title line above it even on a narrow phone row.
+      expect(texts).toEqual([])
+      expect(svgs.length).toBe(1)
+      const source = String(svgs[0]?.props.source)
+      expect(source).toContain('>Ship it</text>')
+      expect(source).toContain('Tasks 1/4 · 25%')
+      expect(source).toContain('class="c-other')
+      expect(source).toContain('prefers-reduced-motion: reduce')
+      expect(source).not.toContain('clipPath')
+    }
+    // Same row, so the crew button and ✕ stay.
+    expect(await ui.find({ key: 'crew' })).toBeDefined()
+    expect(await ui.find({ key: 'crew-dismiss' })).toBeDefined()
+  })
+
+  test(`${surface}: not collapsed, the band keeps its bar`, async ($, on) => {
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    await $.tool.call({ tool: PROGRESS, title: 'Ship it', phase: 'delegate', total: 4, done: 1 } as never)
+    const drawn = await bandText($, surface, 100, false)
+    if (surface === 'terminal') expect(drawn).toContain('░')
+    else expect(drawn).toContain('clipPath')
+    expect(drawn).toContain('Tasks 1/4')
+  })
+}
+
+test('collapsed: a finished subagent batch reads Done · 100%', async ($, on) => {
+  engine(on)
+  await spawn($, 'One')
+  await spawn($, 'Two')
+  await finish($, 'a1')
+  expect(await bandText($, 'terminal', 100, true)).toContain('Agents 1/2 · 50%')
+  await finish($, 'a2')
+  expect(await bandText($, 'desktop', 100, true)).toContain('Done · 100%')
+})
+
+test('collapsed: Arabic draws right to left', { options: { language: 'ar' } }, async ($, on) => {
+  await startIn($, on, {})
+  await $.tool.call({ tool: PROGRESS, title: 'إطلاق', phase: 'delegate', total: 4, done: 1 } as never)
+  const drawn = await bandText($, 'desktop', 100, true)
+  expect(drawn).toContain('direction="rtl"')
+  expect(drawn).toContain('المهام 1/4 · 25%')
 })

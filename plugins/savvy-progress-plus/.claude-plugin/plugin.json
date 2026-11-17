@@ -1,6 +1,6 @@
 {
   "name": "savvy-progress-plus",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "Progress bar above the prompt for multi-step work (savvy-flow, 2+ subagents, optionally the task list), plus a crew panel (/crew): running, finished and planned subagents with model, effort fit, budget warnings, cost and time. Fork of savvy-progress.",
   "author": {
     "name": "Mohamed Idriss Mokdadi",
