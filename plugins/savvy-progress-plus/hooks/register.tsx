@@ -374,9 +374,10 @@ const batchFlow = (list: AgentRun[], current: number): Source | null => {
   }
 }
 
-const bandSource = (f: Flow | null, tasks: TaskItem[], list: AgentRun[], current: number, dismissed: string): Source | null => {
+// `showTasks` is the `taskBar` option, off while the taskboard mod's /tasks shows the list.
+const bandSource = (f: Flow | null, tasks: TaskItem[], list: AgentRun[], current: number, dismissed: string, showTasks: boolean): Source | null => {
   if (f) return { key: 'flow', flow: f }
-  const derived = listFlow(tasks) ?? batchFlow(list, current)
+  const derived = (showTasks ? listFlow(tasks) : null) ?? batchFlow(list, current)
   return derived && derived.key !== dismissed ? derived : null
 }
 
@@ -1049,6 +1050,20 @@ async function checkBudget($: EngineInterface, budget: Budget, agentId: string):
   }
 }
 
+// The taskboard mod owns the task list's display when its /tasks command is there.
+// Only a plugin's /tasks counts: a built-in command of that name is not the board.
+async function hasTaskboard($: EngineInterface): Promise<boolean> {
+  try {
+    const commands = await $.command.list()
+    return commands.some(c => c.name === 'tasks' && c.source === 'plugin' && (c.plugin === undefined || c.plugin === 'taskboard'))
+  } catch {
+    return false
+  }
+}
+
+// Module scope is fine: session.start and each new task check it again.
+let taskboard = false
+
 const TASK_STATUS: readonly TaskItem['status'][] = ['pending', 'in_progress', 'completed']
 
 export const register: Register = (on, options) => {
@@ -1060,6 +1075,7 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     lang = await detectLang($, options.language)
+    taskboard = await hasTaskboard($)
     await $.tool.register({
       name: 'progress',
       description:
@@ -1178,6 +1194,8 @@ export const register: Register = (on, options) => {
     const task = (result.result as { task?: { id?: unknown; subject?: unknown } } | undefined)?.task
     if (result.isError || result.deny !== undefined || !task || typeof task.id !== 'string') return result
     const item: TaskItem = { id: task.id, subject: clip(String(task.subject ?? ''), MAX_TITLE), status: 'pending' }
+    // A board loaded after this mod's start is found here, before its list could show.
+    if (options.taskBar === true) taskboard = await hasTaskboard($)
     await update($, taskList, list => [...list.filter(t => t.id !== item.id), item].slice(-MAX_LIST))
     return result
   })
@@ -1522,7 +1540,8 @@ export const register: Register = (on, options) => {
     const saved = await read($, flow)
     const list = await read($, agents)
     const p: Panel = await read($, panel)
-    const source = bandSource(saved, await read($, taskList), list, await read($, batch), p.dismissed ?? '')
+    const showTasks = options.taskBar === true && !taskboard
+    const source = bandSource(saved, await read($, taskList), list, await read($, batch), p.dismissed ?? '', showTasks)
     if (!source) return next(e)
     const f = source.flow
     // Draw this row with the other mods' bands beneath it. Claude Code's own placeholder ({ type: 'engine' }) is

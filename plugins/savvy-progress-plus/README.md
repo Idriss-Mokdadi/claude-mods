@@ -11,7 +11,7 @@ A Claude Code mod: a progress bar above the prompt for any multi-step work, and 
 
 - **Progress bar** above the prompt, from the first source that applies:
   1. a savvy-flow report (`mcp__savvy-progress-plus__progress`): title, phase, accepted tasks out of planned;
-  2. the session's task list (TaskCreate / TaskUpdate), from 2 tasks: completed out of total, titled with the task in progress;
+  2. only with `taskBar` on: the session's task list (TaskCreate / TaskUpdate), from 2 tasks: completed out of total, titled with the task in progress. Off by default, because the [taskboard](../taskboard) mod shows the list; while taskboard's `/tasks` command is installed it stays off even with `taskBar` on;
   3. a batch of 2+ subagents (a spawn while none runs starts a new batch): finished out of started.
   `✕` clears a savvy flow; for a task list or a batch it hides that one until a new one starts.
 - **Crew panel** (`/crew`): running, finished and planned subagents with model, effort, task progress, context, estimated cost and time. The header totals cost, tokens, time and agent count of all subagents.
@@ -45,6 +45,7 @@ Set in `/config`, or in `~/.claude/settings.json` under `pluginConfigs`:
 | `autoOpen` | `savvy`: open the panel when a savvy worker starts or a plan is reported; `any`: also once for any subagent | `savvy` |
 | `budgetTokens` | tokens per subagent; `0` is off | `0` |
 | `budgetUsd` | estimated USD per subagent; `0` is off | `0` |
+| `taskBar` | `true`: also count the task list on the bar (ignored while taskboard's `/tasks` is installed) | `false` |
 
 ## Limits
 
@@ -52,6 +53,7 @@ Set in `/config`, or in `~/.claude/settings.json` under `pluginConfigs`:
 - Cost is an estimate from token counts and a built-in price table (`PRICES` in `hooks/register.tsx`, list prices as of 2026-10-10), not a bill. Cache writes are priced at the 1-hour rate.
 - The effort-fit dot is a heuristic. It reads the brief's length and the description's words, not the work itself.
 - The task list is followed from the moment the mod loads; tasks created before that are not counted.
+- Taskboard is found by a `/tasks` command that a plugin adds (a built-in `/tasks` does not count). It is checked at session start and at each new task.
 - The original savvy-flow skill names `mcp__savvy-progress__progress`. With only this fork installed, tell the skill (or the model) to use `mcp__savvy-progress-plus__progress` instead; the task-list and subagent bars need no tool at all.
 - No network calls, no processes, no file writes.
 
