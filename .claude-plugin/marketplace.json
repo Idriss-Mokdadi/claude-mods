@@ -30,6 +30,11 @@
       "name": "launcher",
       "source": "./plugins/launcher",
       "description": "Mode buttons (STUDY, TECH, DEEP…), EN/FR/AR, shortcuts to your mods, and a glossary side panel."
+    },
+    {
+      "name": "taskboard",
+      "source": "./plugins/taskboard",
+      "description": "Crab task board: one crab per task, live activity line, timeline, /taskboard."
     }
   ]
 }

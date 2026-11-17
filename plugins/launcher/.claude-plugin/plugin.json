@@ -1,6 +1,6 @@
 {
   "name": "launcher",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Launcher band: one compact row of answer-mode buttons (SHORT, STUDY, DEEP, TECH ...), EN/FR/AR reply buttons, shortcuts to your other mods when installed, and a Glossary pane built from this chat's STUDY terms. Zero tokens by itself.",
   "author": {
     "name": "Mohamed Idriss Mokdadi",
@@ -20,7 +20,12 @@
       "title": "Language",
       "description": "auto follows Claude Code's language setting, then the system locale; en, fr or ar (right to left)",
       "default": "auto",
-      "options": ["auto", "en", "fr", "ar"]
+      "options": [
+        "auto",
+        "en",
+        "fr",
+        "ar"
+      ]
     }
   }
 }

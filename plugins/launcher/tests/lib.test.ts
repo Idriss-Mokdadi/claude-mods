@@ -4,6 +4,7 @@ import {
   collectTerms,
   fitRow,
   installedShortcuts,
+  resolveShortcut,
   parsePrefix,
   parseTerms,
   termKey,
@@ -135,4 +136,17 @@ test('fitRow keeps the fixed items and the others in order while they fit', () =
   const r = fitRow(items, 32, 5)
   expect(r.shown.map(x => x.key)).toEqual(['a', 'b', 'z'])
   expect(r.hidden.map(x => x.key)).toEqual(['c', 'd'])
+})
+
+test('a mod that falls back to another name still gets its shortcut', () => {
+  const list = [
+    { name: 'tasks', source: 'builtin' },
+    { name: 'taskboard', source: 'plugin', plugin: 'taskboard' },
+    { name: 'theme', source: 'builtin' },
+    { name: 'lagoon', source: 'plugin', plugin: 'companion' },
+  ]
+  expect(installedShortcuts(list)).toEqual(['tasks', 'theme'])
+  expect(resolveShortcut(list, 'tasks')).toBe('taskboard')
+  expect(resolveShortcut(list, 'theme')).toBe('lagoon')
+  expect(resolveShortcut([{ name: 'tasks', source: 'builtin' }], 'tasks')).toBeUndefined()
 })

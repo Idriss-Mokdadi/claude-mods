@@ -13,6 +13,7 @@ import {
   collectTerms,
   fitRow,
   installedShortcuts,
+  resolveShortcut,
   tagOf,
   tagText,
   termsMarkdown,
@@ -72,6 +73,7 @@ async function refreshInstalled($: EngineInterface): Promise<void> {
   try {
     const list = (await $.command.list()) as readonly CommandLike[]
     const names = installedShortcuts(list)
+    resolved = new Map(names.map(n => [n, resolveShortcut(list, n) ?? n]))
     await update($, installed, prev => (prev.join() === names.join() ? prev : names))
   } catch {
     // Keep what we had.
@@ -119,9 +121,12 @@ async function clearSticky($: EngineInterface): Promise<void> {
   $.ui.toast(tr().stickyCleared)
 }
 
+// Shortcut -> the command that really serves it (e.g. tasks -> taskboard).
+let resolved = new Map<string, string>()
+
 async function runShortcut($: EngineInterface, command: string): Promise<void> {
   try {
-    await $.command.run({ command })
+    await $.command.run({ command: resolved.get(command) ?? command })
   } catch (err) {
     $.ui.toast(fill(tr().failed, { cmd: command, why: err instanceof Error ? err.message : String(err) }))
   }

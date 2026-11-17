@@ -1077,7 +1077,7 @@ async function checkBudget($: EngineInterface, budget: Budget, agentId: string):
 async function hasTaskboard($: EngineInterface): Promise<boolean> {
   try {
     const commands = await $.command.list()
-    return commands.some(c => c.name === 'tasks' && c.source === 'plugin' && (c.plugin === undefined || c.plugin === 'taskboard'))
+    return commands.some(c => (c.name === 'tasks' || c.name === 'taskboard') && c.source === 'plugin' && (c.plugin === undefined || c.plugin === 'taskboard'))
   } catch {
     return false
   }

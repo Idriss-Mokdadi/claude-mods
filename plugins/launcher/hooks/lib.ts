@@ -35,15 +35,19 @@ export type CommandLike = { name: string; source?: string; plugin?: string }
 
 // The shortcut commands another mod serves. A built-in of the same name
 // (Claude Code has its own /tasks and /theme) does not count.
+// Where Claude Code keeps a name for itself, the mod serves another one:
+// taskboard falls back to /taskboard, companion to /lagoon.
+export const ALIASES: Record<string, readonly string[]> = { tasks: ['tasks', 'taskboard'], theme: ['theme', 'lagoon'] }
+
+// The plugin command that serves a shortcut, or undefined.
+export function resolveShortcut(list: readonly CommandLike[], command: string): string | undefined {
+  for (const name of ALIASES[command] ?? [command])
+    if (list.some(c => c.name === name && c.source !== 'builtin' && c.plugin !== 'launcher')) return name
+  return undefined
+}
+
 export function installedShortcuts(list: readonly CommandLike[]): string[] {
-  const wanted = new Set<string>(SHORTCUTS.map(s => s.command))
-  const out = new Set<string>()
-  for (const c of list) {
-    if (!wanted.has(c.name)) continue
-    if (c.source === 'builtin' || c.plugin === 'launcher') continue
-    out.add(c.name)
-  }
-  return SHORTCUTS.map(s => s.command).filter(n => out.has(n))
+  return SHORTCUTS.map(s => s.command).filter(n => resolveShortcut(list, n) !== undefined)
 }
 
 // ---------------------------------------------------------------------------
