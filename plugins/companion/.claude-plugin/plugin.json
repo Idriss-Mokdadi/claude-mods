@@ -1,0 +1,25 @@
+{
+  "name": "companion",
+  "version": "0.1.0",
+  "description": "Crab companion: the animated Lagoon backdrop in a left strip (5-hour limit as water bands, 7-day limit as shells, cache age as sun to moon and sleeping crabs, one jellyfish per subagent, a sandcastle per task step), a mood crab band with Lagoon and sound toggles, done alerts with a crab chirp, and celebrations. Hooks only: zero tokens.",
+  "author": {
+    "name": "Mohamed Idriss Mokdadi",
+    "url": "https://github.com/Idriss-Mokdadi"
+  },
+  "license": "MIT",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "lagoon": { "type": "boolean", "title": "Lagoon backdrop", "description": "Draw the Lagoon behind the session (desktop and mobile). The 🌊 button and /theme switch it; the last choice is remembered", "default": true },
+    "stripWidth": { "type": "number", "title": "Lagoon strip width (px)", "description": "Desktop draws the Lagoon in a strip this wide against the window's edge, where the session list sits; the rest stays plain", "default": 260 },
+    "stripSide": { "type": "string", "title": "Lagoon strip side", "description": "Which edge of the desktop window the strip sits on", "default": "left", "options": ["left", "right"] },
+    "glassBlur": { "type": "number", "title": "Glass blur (points)", "description": "How much the panels over the Lagoon blur it, 0 to 64", "default": 12 },
+    "glassOpacity": { "type": "number", "title": "Glass opacity", "description": "How opaque the panels over the Lagoon are, 0 to 1; higher keeps the session list easier to read", "default": 0.55 },
+    "sound": { "type": "boolean", "title": "Sound", "description": "Crab chirps on done alerts, waits and celebrations. The 🔔 button switches it; the last choice is remembered", "default": true },
+    "volume": { "type": "number", "title": "Volume (%)", "description": "Chirp volume, 0 to 100", "default": 70 },
+    "alertSeconds": { "type": "number", "title": "Done alert after (seconds)", "description": "Toast and chirp when Claude finishes a turn that worked at least this long", "default": 30 },
+    "celebrations": { "type": "boolean", "title": "Celebrations", "description": "Crab dance, fireworks and a happy chirp when all tasks are done, tests pass after failing, or a git commit succeeds (at most one every 30 seconds)", "default": true },
+    "criticalPercent": { "type": "number", "title": "Critical limit (%)", "description": "From this 5-hour or 7-day percent the crab turns red and angry", "default": 90 },
+    "cacheTtl": { "type": "string", "title": "Prompt-cache TTL", "description": "auto: the TTL the engine reports on a model switch, else 1h on a subscription and 5m otherwise", "default": "auto", "options": ["auto", "5m", "1h"] },
+    "language": { "type": "string", "title": "Language", "description": "auto follows Claude Code's language setting, then the system locale; en, fr or ar (right to left)", "default": "auto", "options": ["auto", "en", "fr", "ar"] }
+  }
+}
