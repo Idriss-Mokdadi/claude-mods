@@ -67,7 +67,26 @@ export type Cache = {
   detectedTtl: '5m' | '1h' | null
 }
 
-export type Handoff = { path: string; at: number; isRunning: boolean; usd: number }
+export type HandoffStatus = 'confirm' | 'running' | 'done' | 'error' | 'cancelled'
+
+// One side-chat handoff: its run, its note, what it cost.
+export type Handoff = {
+  status: HandoffStatus
+  // Bumped by Cancel and by a new run: a fork's reply for an older run is dropped.
+  runId: number
+  // HANDOFF-<date-time>.md, the file Save writes under handoff/.
+  name: string
+  text: string
+  opening: string
+  usd: number
+  cacheRead: number
+  // What the fork would cost with a cold cache, shown before it runs.
+  estimateUsd: number
+  startedAt: number
+  endedAt: number
+  error: string
+  savedPath: string
+}
 
 declare module 'claude-code' {
   interface PluginState {

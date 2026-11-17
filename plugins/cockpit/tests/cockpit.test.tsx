@@ -39,6 +39,10 @@ type World = {
   modelSwitchWorks: boolean
   panes: { id: string; title?: string }[]
   store: Map<string, unknown>
+  forkPrompts: string[]
+  fork: () => unknown
+  copies: { text: string; surface?: string }[]
+  appended: () => readonly unknown[]
   ctx: number
   five: number
 }
@@ -50,7 +54,7 @@ async function start($: Engine, on: On, ctx = 30, setup: Setup = {}) {
   const clock = mock.clock(on, { now: NOW })
   mock.env(on, env)
   const w: World = {
-    toasts: [], writes: [], forks: 0, completes: 0, compacted: 0, usage: () => usageAt(w.ctx, w.five), store: new Map(Object.entries(setup.store ?? {})), ctx, five: 20,
+    toasts: [], writes: [], forks: 0, completes: 0, compacted: 0, usage: () => usageAt(w.ctx, w.five), forkPrompts: [], copies: [], appended: () => [], fork: () => ({ isAnswered: true, text: 'ok', usage: { input_tokens: 40, output_tokens: 2, cache_read_input_tokens: 200_000, cache_creation_input_tokens: 0 } }), store: new Map(Object.entries(setup.store ?? {})), ctx, five: 20,
     model: 'claude-opus-5-5', panes: [], configSets: [], commands: [], logs: [], modelSwitchWorks: true,
     configRows: setup.rows ?? [{ key: 'model', label: 'Model', kind: 'choice', value: 'opus', options: ['default', 'sonnet', 'opus', 'haiku'], provider: { plugin: 'engine', tier: 'core' }, isLocked: false }],
   }
@@ -110,10 +114,18 @@ async function start($: Engine, on: On, ctx = 30, setup: Setup = {}) {
     w.writes.push({ path: (e as { path: string }).path, text: (e as { text: string }).text })
     return { value: undefined } as never
   })
-  on('model.fork', () => {
+  on('model.fork', async (_$, e) => {
     w.forks += 1
-    return { value: { isAnswered: true, text: 'ok', usage: { input_tokens: 40, output_tokens: 2, cache_read_input_tokens: 200_000, cache_creation_input_tokens: 0 } } } as never
+    w.forkPrompts.push((e as { prompt: string }).prompt)
+    return { value: await w.fork() } as never
   })
+  on('ui.copy', (_$, e) => {
+    const { text, surface } = e as { text: string; surface?: string }
+    w.copies.push({ text, surface })
+    return { value: { isCopied: true } } as never
+  })
+  const session = mock.session(on)
+  w.appended = () => session.appended()
   on('model.complete', () => {
     w.completes += 1
     return {
@@ -372,16 +384,105 @@ test('cache line counts down m:ss left, then sleeps when cold', async ($, on) =>
   await later.unmount()
 })
 
-test('/handoff writes one note with a single cheap call', async ($, on) => {
-  const { w } = await start($, on)
-  const r = (await $.command.run({ command: 'handoff' } as never)) as { text: string }
-  expect(w.completes).toBe(1)
-  expect(w.writes.length).toBe(1)
-  expect(w.writes[0]?.path).toBe('/repo/handoff/HANDOFF-2026-11-04-2015.md')
-  expect(w.writes[0]?.text).toContain('## Goal')
-  expect(w.writes[0]?.text).toContain('## Files touched\n- /repo/a.ts')
-  expect(r.text).toContain('read handoff/HANDOFF-2026-11-04-2015.md')
+const NOTE = [
+  '## Goal and scope', '- Ship cockpit 0.6.0', '## Next steps', '1. Push',
+  '## Opening prompt', '```', 'Read handoff/HANDOFF-2026-11-04-2016.md, then push mod/cockpit.', '```',
+].join('\n')
+const FORKED = { isAnswered: true, text: NOTE, usage: { input_tokens: 900, output_tokens: 1800, cache_read_input_tokens: 240_000, cache_creation_input_tokens: 0 } }
+const HANDOFF = { ...PANE, requestId: 'cockpit-handoff', props: { ...PANE.props, title: 'Handoff' } } as const
+
+// A warm cache: a turn just ended.
+const warm = async ($: Engine) => {
+  await $.turn.complete({ turnId: 't', answer: 'a', durationMs: 1, isAborted: false, reason: 'answer' } as never)
+}
+
+test('/handoff runs one fork over the cached chat, adds nothing to the chat, and shows the note in the Handoff pane', async ($, on) => {
+  const { w, clock } = await start($, on)
+  w.fork = () => FORKED
+  await warm($)
+  await clock.advance(60_000)
+  const r = (await $.command.run({ command: 'handoff' } as never)) as { text?: string }
+  await clock.settle()
+  expect(r.text).toBeUndefined()
+  expect(w.forks).toBe(1)
+  expect(w.completes).toBe(0)
+  expect(w.forkPrompts[0]).toContain('## Owner\'s preferences and constraints')
+  expect(w.forkPrompts[0]).toContain('Read handoff/HANDOFF-2026-11-04-2016.md, then')
+  expect(w.appended()).toEqual([])
+  expect(w.writes).toEqual([])
+  expect(w.panes.some(p => p.id === 'cockpit-handoff')).toBe(true)
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ plugin: PLUGIN, surface, ...HANDOFF } as never)
+    expect(await ui.find({ type: 'Text', text: /cost ≈\$0\.\d+ · 240k tokens read from the cache/ })).toBeDefined()
+    // Copy, Copy opening prompt, Save.
+    await ui.press({ key: 'ho-copy' })
+    expect(w.copies.at(-1)?.text).toBe(NOTE)
+    expect(w.copies.at(-1)?.surface).toBe(surface)
+    await ui.press({ key: 'ho-copy-opening' })
+    expect(w.copies.at(-1)?.text).toBe('Read handoff/HANDOFF-2026-11-04-2016.md, then push mod/cockpit.')
+    await ui.unmount()
+  }
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...HANDOFF } as never)
+  await ui.press({ key: 'ho-save' })
+  expect(w.writes).toEqual([{ path: '/repo/handoff/HANDOFF-2026-11-04-2016.md', text: NOTE + '\n' }])
+  expect(w.forks).toBe(1)
+  await ui.unmount()
 })
+
+test('a cold cache asks first, with the full-price estimate; Continue runs the fork, Cancel does not', async ($, on) => {
+  const { w, clock } = await start($, on)
+  w.fork = () => FORKED
+  // No turn yet: the cache is cold.
+  await $.command.run({ command: 'handoff' } as never)
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...HANDOFF } as never)
+  expect(await ui.find({ type: 'Text', text: /Cache is cold: this handoff will read the whole chat at full price \(≈\$\d+\.\d+\)\. Continue\?/ })).toBeDefined()
+  expect(w.forks).toBe(0)
+  await ui.press({ key: 'ho-cancel' })
+  expect(w.forks).toBe(0)
+  expect(await ui.find({ type: 'Text', text: /Cancelled/ })).toBeDefined()
+  await $.command.run({ command: 'handoff' } as never)
+  await ui.press({ key: 'ho-continue' })
+  await clock.settle()
+  expect(w.forks).toBe(1)
+  expect(await ui.find({ key: 'ho-copy' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('Cancel while running drops the reply when it comes', async ($, on) => {
+  const { w, clock } = await start($, on)
+  let release: (v: unknown) => void = () => {}
+  w.fork = () => new Promise(r => (release = r))
+  await warm($)
+  await $.command.run({ command: 'handoff' } as never)
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...HANDOFF } as never)
+  expect(await ui.find({ type: 'Text', text: /Writing the handoff from the cached chat/ })).toBeDefined()
+  await ui.press({ key: 'ho-cancel' })
+  release(FORKED)
+  await clock.settle()
+  expect(await ui.find({ key: 'ho-copy' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /Cancelled/ })).toBeDefined()
+  await ui.unmount()
+})
+
+for (const [reply, said] of [
+  [{ isAnswered: false, reason: 'nothing-to-fork' }, /Nothing to hand off yet/],
+  [{ isAnswered: false, reason: 'api-error', status: 529, error: 'overloaded', usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } }, /API returned an error \(529, overloaded\)/],
+  [{ isAnswered: false, reason: 'empty-reply', usage: { input_tokens: 10, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } }, /no text/],
+  [{ isAnswered: false, reason: 'aborted', usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } }, /interrupted/],
+] as const) {
+  test(`a failed fork (${reply.reason}) says why and offers to try again`, async ($, on) => {
+    const { w, clock } = await start($, on)
+    w.fork = () => reply
+    await warm($)
+    await $.command.run({ command: 'handoff' } as never)
+    await clock.settle()
+    const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...HANDOFF } as never)
+    expect(await ui.find({ type: 'Text', text: said })).toBeDefined()
+    expect(await ui.find({ key: 'ho-again' })).toBeDefined()
+    expect(await ui.find({ key: 'ho-copy' })).toBeUndefined()
+    await ui.unmount()
+  })
+}
 
 const BREAKDOWN = (e: { breakdown?: string }) =>
   !e.breakdown
@@ -605,3 +706,35 @@ function bandRows(tree: unknown, cols: number): number {
   }
   return rows(tree, cols)
 }
+
+test('the Handoff pane before any run explains itself and offers to start', async ($, on) => {
+  const { w, clock } = await start($, on)
+  w.fork = () => FORKED
+  await warm($)
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ plugin: PLUGIN, surface, ...HANDOFF } as never)
+    expect(await ui.find({ type: 'Text', text: /Nothing is added to the chat/ })).toBeDefined()
+    await ui.unmount()
+  }
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...HANDOFF } as never)
+  await ui.press({ key: 'ho-start' })
+  await clock.settle()
+  expect(w.forks).toBe(1)
+  expect(await ui.find({ key: 'ho-copy' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('the band\'s Handoff button at the critical level starts the same side-chat handoff', async ($, on) => {
+  const { w, clock } = await start($, on)
+  w.fork = () => FORKED
+  await warm($)
+  await measure($, w, 92)
+  const ui = await band($, 'desktop')
+  await ui.press({ key: 'cockpit-usage' })
+  await ui.press({ key: 'cockpit-handoff' })
+  await clock.settle()
+  expect(w.forks).toBe(1)
+  expect(w.panes.some(p => p.id === 'cockpit-handoff' && p.title === 'Handoff')).toBe(true)
+  expect(w.appended()).toEqual([])
+  await ui.unmount()
+})

@@ -47,7 +47,10 @@ Bar colours: green under 50%, yellow 50-70%, orange 70-85%, red over 85%.
 2. **Switch.** Sets the model through the `/config` model row, falls back to `/model`, then reads the session's model back; if it did not change, a toast says "Model not changed: pick <model> in the model menu". Effort is set with `/effort`.
 3. **Active effort** is read from `CLAUDE_EFFORT`, the `/config` rows, the `effortLevel` setting, `CLAUDE_CODE_EFFORT_LEVEL`, each model request and the classic hooks, and again after `/effort` or `/model`.
 4. **Budget guard.** Toast at the warning level (70%), Compact now and Handoff past the critical level (85%), over context and plan limits.
-5. **`/handoff`.** One Haiku call at low effort writes `handoff/HANDOFF-<date-time>.md` (goal, decisions, open problems, next steps, files touched), then tells you to start a new session with `read handoff/<file>`. A basic note is written if the call fails.
+5. **Handoff, as a side chat.** `/handoff`, the band's **Handoff** button (critical row) and the one in `/usage-panel` run **one** `$.model.fork` over the session's own cached transcript: same model, no effort override, so the cached prefix is read at the cache-read price. Nothing is added to the chat (like `/btw`). The fork writes the most complete handoff it can, so a new chat can continue without re-reading this one: goal and scope, the owner's preferences and constraints, decisions and why, current state, every file created or changed with its role, commands, open bugs and risks, exact next steps, and a ready-to-paste **opening prompt** ("Read handoff/HANDOFF-<date-time>.md, then …"). It shows in the **Handoff** pane (suitcase crab) with **Copy** (the whole Markdown), **Save** (writes `handoff/HANDOFF-<date-time>.md` in the working directory), **Copy opening prompt**, and what the call cost. If cockpit's cache timer says the cache is cold, the pane first asks "Cache is cold: this handoff will read the whole chat at full price (≈$x). Continue?". While it runs, **Cancel** abandons it: the fork takes no abort signal, so the reply is dropped when it comes (a request already sent may still be billed).
+
+   ![Handoff pane](docs/v06-handoff-done-60col-dark.png)
+
 6. **Cache keep-alive** (off by default), see Limits.
 
 ## Commands
@@ -55,7 +58,7 @@ Bar colours: green under 50%, yellow 50-70%, orange 70-85%, red over 85%.
 | Command | Does |
 | --- | --- |
 | `/usage-panel` | Opens or closes the panel (`/usage-panel open` only opens it). |
-| `/handoff` | Writes the handoff note. |
+| `/handoff` | Opens the Handoff pane and writes a complete handoff for a new chat (one fork over the cached chat; nothing added to the chat). |
 
 ## Settings (`/config`)
 
@@ -80,4 +83,4 @@ Bar colours: green under 50%, yellow 50-70%, orange 70-85%, red over 85%.
 - **Switch**: a model switch drops the prompt cache. Whether the `/config` model row accepts a plugin's change on every host is not verified live; the read-back check reports it when it does not.
 - **Compact now** works only while Claude is idle.
 - The band's breakdown uses the free local estimate (`summary`); the panel's uses `full`, which sends token-count requests as `/context` does, only when it opens or you press Refresh.
-- No network calls of its own, no processes. `/handoff` is the only file it writes.
+- No network calls of its own, no processes. The only file it writes is the handoff note, and only when you press Save.
