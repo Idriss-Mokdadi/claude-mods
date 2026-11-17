@@ -5,7 +5,8 @@
     "workspace@claude-mods": true,
     "memory@claude-mods": true,
     "launcher@claude-mods": true,
-    "taskboard@claude-mods": true
+    "taskboard@claude-mods": true,
+    "companion@claude-mods": true
   },
   "extraKnownMarketplaces": {
     "claude-mods": {

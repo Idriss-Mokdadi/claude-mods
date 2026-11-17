@@ -35,6 +35,11 @@
       "name": "taskboard",
       "source": "./plugins/taskboard",
       "description": "Crab task board: one crab per task, live activity line, timeline, /taskboard."
+    },
+    {
+      "name": "companion",
+      "source": "./plugins/companion",
+      "description": "Animated Lagoon in the left sidebar, mood crab, done alerts with a crab chirp, celebrations. /lagoon toggles the theme."
     }
   ]
 }
