@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { advise, adviceFor, attribute, categoryIcon, cleanPrompt, costOf, filesTouched, fitOf, handoffName, isPersonOrigin, levelOf, modelTone, pingCost, toneOf, worstTone } from '../hooks/lib'
+import { advise, adviceFor, attribute, categoryIcon, cleanPrompt, costOf, fitOf, handoffName, isPersonOrigin, levelOf, modelTone, pingCost, toneOf, worstTone } from '../hooks/lib'
 
 test('advisor: short and factual prompts go to Haiku, low', () => {
   expect(advise('short: what is OFDM?')).toMatchObject({ model: 'haiku', effort: 'low' })
@@ -68,8 +68,7 @@ test('attribution: tools, skills and subagents, largest first', () => {
   expect(rows.find(r => r.kind === 'agent')).toMatchObject({ key: 'Explore' })
 })
 
-test('handoff helpers: touched files and the file name', () => {
-  expect(filesTouched(MSGS)).toEqual(['/r/a.ts', '/r/b.md'])
+test('handoff file name', () => {
   expect(handoffName(Date.parse('2026-11-04T20:15:00Z'))).toBe('HANDOFF-2026-11-04-2015.md')
 })
 

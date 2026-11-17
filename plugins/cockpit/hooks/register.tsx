@@ -1,10 +1,11 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, SessionMessage, SessionUsage, PluginOptions } from 'claude-code'
+import type { EngineInterface, Register, RenderSurface, SessionMessage, SessionUsage, PluginOptions } from 'claude-code'
 
 import type { Advice, Cache, Handoff, Level, Limit, Mood, PaneData, Snapshot, Tone } from '../types'
 import { CLAY, CRAB_CSS, crab, crabText } from './crab'
 import { crabIcon, iconWidth } from './crab-icons'
 import { AI_PROMPT, TIERS, isAmbiguous, tierFromLabel, whyText } from './advisor'
+import { coldEstimateUsd, failureText, handoffPrompt, openingPromptOf } from './handoff'
 import type { Sticky } from './advisor'
 import type { IconKind } from './crab-icons'
 import { STRINGS, fill, langOf } from './i18n'
@@ -20,7 +21,6 @@ import {
   costOf,
   effortRank,
   familyOf,
-  filesTouched,
   fitOf,
   fmtCost,
   fmtLeft,
@@ -33,7 +33,6 @@ import {
   modelTone,
   pingCost,
   toneOf,
-  transcriptText,
   worstTone,
 } from './lib'
 
@@ -48,7 +47,7 @@ const now = atom({ plugin: 'cockpit', key: 'now' } as const, 0)
 const cache = atom({ plugin: 'cockpit', key: 'cache' } as const, { touchedAt: 0, pings: 0, pingUsd: 0, detectedTtl: null }, { shape: 'cache-1' })
 const pane = atom({ plugin: 'cockpit', key: 'pane' } as const, null, { shape: 'pane-1' })
 const alerted = atom({ plugin: 'cockpit', key: 'alerted' } as const, 'ok')
-const handoff = atom({ plugin: 'cockpit', key: 'handoff' } as const, null, { shape: 'ho-1' })
+const handoff = atom({ plugin: 'cockpit', key: 'handoff' } as const, null, { shape: 'ho-2' })
 const expanded = atom({ plugin: 'cockpit', key: 'expanded' } as const, false)
 const showAll = atom({ plugin: 'cockpit', key: 'showAll' } as const, false)
 
@@ -233,86 +232,97 @@ async function maybePing($: EngineInterface): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Handoff.
+// Handoff: a side chat. One `$.model.fork` over the session's own cached
+// transcript (same model, no effort override, so the cached prefix is read at
+// the cache-read price) writes the note; nothing is added to the chat. It shows
+// in the Handoff pane, with Copy, Save and Copy opening prompt.
 
-const HANDOFF_SYSTEM =
-  'You write short handoff notes so a new Claude Code session can continue the work. Plain Markdown, no preamble. Be concrete; use file paths and names from the transcript; never invent anything.'
+const HANDOFF_PANE = 'cockpit-handoff'
 
-const HANDOFF_ASK = `Write a handoff note for the conversation below, with exactly these sections:
-## Goal
-## Decisions
-## Open problems
-## Next steps
-One-line bullets, at most 8 per section, "None" when a section is empty. Do not list touched files: they are added separately.
-
-TRANSCRIPT:
-`
-
-const fallbackNote = (msgs: readonly SessionMessage[]): string => {
-  const asks = msgs.filter(m => m.role === 'user' && m.text.trim()).slice(-5)
-  const last = [...msgs].reverse().find(m => m.role === 'assistant' && m.text.trim())
-  return [
-    '## Goal',
-    ...(asks.length ? asks.map(m => `- ${m.text.trim().split('\n')[0]?.slice(0, 200)}`) : ['- None']),
-    '',
-    '## Last reply',
-    last ? last.text.trim().slice(0, 1500) : 'None',
-    '',
-    '## Next steps',
-    '- Read this note and the files below, then ask the user what to do next.',
-  ].join('\n')
+async function openHandoffPane($: EngineInterface): Promise<void> {
+  await $.ui.open({ id: HANDOFF_PANE, title: tr().handoff })
 }
 
-export async function writeHandoff($: EngineInterface): Promise<string> {
-  const s = tr()
-  const raw = await $.session.messages()
-  const msgs = (Array.isArray(raw) ? raw : []) as SessionMessage[]
-  if (!msgs.some(m => m.text.trim() || m.toolUses.length)) return s.handoffEmpty
+// Starts a handoff: asks first when the cache is cold (the fork would then pay
+// for the whole chat), else runs at once.
+export async function startHandoff($: EngineInterface): Promise<void> {
+  const cur = await read($, handoff)
+  if (cur?.status === 'running') return openHandoffPane($)
   const at = await $.clock.now()
-  await update($, handoff, () => ({ path: '', at, isRunning: true, usd: 0 }))
-  try {
-    const files = filesTouched(msgs)
-    const r = await $.model.complete({
-      model: 'haiku',
-      effort: 'low',
-      maxTokens: 1500,
-      timeoutMs: 90_000,
-      system: HANDOFF_SYSTEM,
-      prompt: HANDOFF_ASK + transcriptText(msgs),
-    })
-    const usd = costOf('haiku', r.usage)
-    const body = r.isAnswered && r.text.trim() ? r.text.trim() : fallbackNote(msgs)
-    const name = handoffName(at)
-    const rel = `handoff/${name}`
-    const cwd = await $.session.cwd()
-    const text = [
-      `# Handoff ${new Date(at).toISOString().slice(0, 16).replace('T', ' ')} UTC`,
-      '',
-      body,
-      '',
-      '## Files touched',
-      ...(files.length ? files.map(f => `- ${f}`) : ['- None']),
-      '',
-      `<!-- Written by the cockpit mod. Summary call: ${r.isAnswered ? 'Haiku, low effort' : 'failed, basic note'}; ≈${fmtCost(usd)}. -->`,
-      '',
-    ].join('\n')
-    await $.fs.write(`${cwd.replace(/\/$/, '')}/${rel}`, text)
-    await update($, handoff, () => ({ path: rel, at, isRunning: false, usd }))
-    const done = fill(s.handoffDone, { path: rel })
-    return r.isAnswered ? done : `${fill(s.handoffFallback, { why: r.reason })} ${done}`
-  } catch (err) {
-    await update($, handoff, () => null)
-    throw err
+  const c = await read($, cache)
+  const snap = await read($, snapshot)
+  const isCold = !c.touchedAt || at - c.touchedAt >= ttlOf(c, snap).ms
+  const name = handoffName(at)
+  const base: Handoff = {
+    status: isCold ? 'confirm' : 'running',
+    runId: (cur?.runId ?? 0) + 1,
+    name,
+    text: '',
+    opening: '',
+    usd: 0,
+    cacheRead: 0,
+    estimateUsd: coldEstimateUsd(model, snap?.contextTokens ?? 0),
+    startedAt: at,
+    endedAt: 0,
+    error: '',
+    savedPath: '',
   }
+  await update($, handoff, () => base)
+  await openHandoffPane($)
+  if (!isCold) void runFork($, base.runId)
 }
 
-async function runHandoff($: EngineInterface): Promise<void> {
-  $.ui.toast(tr().handoffRunning)
+// Runs the fork for one run; a run cancelled meanwhile has its reply dropped.
+async function runFork($: EngineInterface, runId: number): Promise<void> {
+  const ho = await read($, handoff)
+  if (!ho || ho.runId !== runId) return
+  const file = `handoff/${ho.name}`
+  await update($, handoff, x => (x && x.runId === runId ? { ...x, status: 'running' as const, startedAt: ho.startedAt } : x))
+  let r: Awaited<ReturnType<EngineInterface['model']['fork']>>
   try {
-    $.ui.toast(await writeHandoff($))
+    r = await $.model.fork({ prompt: handoffPrompt(file) })
   } catch (err) {
-    $.ui.toast(`Handoff failed: ${err instanceof Error ? err.message : String(err)}`)
+    const msg = err instanceof Error ? err.message : String(err)
+    await update($, handoff, x => (x && x.runId === runId && x.status === 'running' ? { ...x, status: 'error' as const, error: msg } : x))
+    return
   }
+  const done = await $.clock.now()
+  const usd = 'usage' in r ? costOf(model, r.usage) : 0
+  const cacheRead = 'usage' in r ? r.usage.cache_read_input_tokens : 0
+  await update($, handoff, x => {
+    if (!x || x.runId !== runId || x.status !== 'running') return x
+    if (r.isAnswered) return { ...x, status: 'done' as const, text: r.text.trim(), opening: openingPromptOf(r.text, file), usd, cacheRead, endedAt: done }
+    const extra = r.reason === 'api-error' ? { status: r.status, error: r.error } : {}
+    return { ...x, status: 'error' as const, error: failureText(r.reason, extra), usd, endedAt: done }
+  })
+  // The fork read the main thread's cache: its entry is fresh again.
+  if (cacheRead > 0) await update($, cache, c => ({ ...c, touchedAt: done }))
+}
+
+async function confirmHandoff($: EngineInterface): Promise<void> {
+  const ho = await read($, handoff)
+  if (ho?.status === 'confirm') void runFork($, ho.runId)
+}
+
+// Cancel: the fork takes no abort signal, so the run is abandoned: its reply is
+// dropped when it comes (a fork already sent may still be billed).
+async function cancelHandoff($: EngineInterface): Promise<void> {
+  await update($, handoff, x => (x ? { ...x, status: 'cancelled' as const, runId: x.runId + 1 } : x))
+}
+
+async function copyText($: EngineInterface, text: string, surface: RenderSurface | undefined, what: string): Promise<void> {
+  const r = await $.ui.copy({ text, surface })
+  $.ui.toast(r.isCopied ? fill(tr().copied, { what }) : fill(tr().copyFailed, { why: r.reason ?? '' }))
+}
+
+async function saveHandoff($: EngineInterface): Promise<void> {
+  const ho = await read($, handoff)
+  if (!ho || ho.status !== 'done') return
+  const rel = `handoff/${ho.name}`
+  const cwd = await $.session.cwd()
+  await $.fs.write(`${cwd.replace(/\/$/, '')}/${rel}`, `${ho.text}\n`)
+  await update($, handoff, x => (x ? { ...x, savedPath: rel } : x))
+  $.ui.toast(fill(tr().handoffSaved, { path: rel }))
 }
 
 async function compactNow($: EngineInterface): Promise<void> {
@@ -581,7 +591,7 @@ async function viewOf($: EngineInterface): Promise<View> {
   const { pct } = budgetOf(snap)
   const level = levelOf(pct, w, k)
   const worst = worstTone(lines.flatMap(l => (l.tone && l.key !== 'cache' ? [l.tone] : [])))
-  const mood: Mood = ho && (ho.isRunning || at - ho.at < 60_000) ? 'suitcase' : crabFor(worst)
+  const mood: Mood = ho && (ho.status === 'running' || ho.status === 'confirm' || (ho.status === 'done' && at - ho.endedAt < 60_000)) ? 'suitcase' : crabFor(worst)
   return { status: lines, model: modelLine, advice: a, worst, mood, level }
 }
 
@@ -657,7 +667,7 @@ export const register: Register = (on, options) => {
     lang = await detectLang($)
     await refreshModel($)
     await $.command.register({ name: 'usage-panel', description: 'Show or hide the cockpit usage panel: limits, cost, cache, model fit and what uses your tokens' })
-    await $.command.register({ name: 'handoff', description: 'Write a handoff note to handoff/HANDOFF-<date>.md for a fresh session (one cheap Haiku call)' })
+    await $.command.register({ name: 'handoff', description: 'Write a complete handoff for a new chat in a side pane (one fork over the cached chat; nothing added here)' })
     await setEffort($, await readEffort($))
     try {
       const was = await $.store.get(STORE_EXPANDED)
@@ -769,13 +779,18 @@ export const register: Register = (on, options) => {
     return { text: (await togglePane($)) ? tr().opened : tr().closed }
   })
 
-  on('command.run', { command: 'handoff' }, async $ => ({ text: await writeHandoff($) }))
+  // Like /btw: the note goes to the Handoff pane, nothing to the chat.
+  on('command.run', { command: 'handoff' }, async $ => {
+    await startHandoff($)
+    return {}
+  })
 
   // -------------------------------------------------------------------------
   // Drawing.
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => drawPane($, e, true))
   on('ui.render', { component: 'Pane', requestId: TOKENS }, async ($, e) => drawPane($, e, false))
+  on('ui.render', { component: 'Pane', requestId: HANDOFF_PANE }, async ($, e) => drawHandoff($, e))
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
@@ -843,6 +858,88 @@ async function drawPane($: EngineInterface, e: El, withStatus: boolean) {
         <Button key="refresh" label={size.isSvg ? s.refresh : `🔄 ${s.refresh}`} plain onPress={() => refreshData($, 'full')} />
       </Box>
       {data ? <Text dimColor>{s.estimateNote}</Text> : null}
+    </Box>
+  )
+}
+
+// The Handoff pane: confirm when the cache is cold, progress with Cancel, the
+// note with Copy, Save and Copy opening prompt, its cost; or why it failed.
+async function drawHandoff($: EngineInterface, e: El) {
+  const s = tr()
+  const ui = $.ui.resolve(e) as unknown as UI & { Markdown?: El }
+  const { Box, Text, Button } = ui
+  const size = sizeOf(e.props.bodyColumns, e.surface !== 'terminal' && 'Svg' in ui, 32)
+  const ho = await read($, handoff)
+  const at = await read($, now)
+  const head = (
+    <Box key="ho-head" flexDirection={isRtl() ? 'row-reverse' : 'row'} gap={1} alignItems="center">
+      {size.isSvg ? iconEl(ui, 'handoff', ho?.status === 'error' ? 'red' : 'green', size) : <Text color={CLAY}>{crabText('suitcase')}</Text>}
+      <Text bold>{size.isSvg ? s.handoff : `🧳 ${s.handoff}`}</Text>
+    </Box>
+  )
+  const again = <Button key="ho-again" label={s.handoffAgain} plain onPress={() => startHandoff($)} />
+  if (!ho || ho.status === 'cancelled') {
+    return (
+      <Box flexDirection="column" gap={1}>
+        {head}
+        <Text dimColor>{ho ? s.handoffCancelled : s.handoffIntro}</Text>
+        <Box flexDirection="row" gap={1} flexWrap="wrap">
+          <Button key="ho-start" label={s.handoffStart} variant="primary" onPress={() => startHandoff($)} />
+        </Box>
+      </Box>
+    )
+  }
+  if (ho.status === 'confirm') {
+    return (
+      <Box flexDirection="column" gap={1}>
+        {head}
+        <Text>{fill(s.handoffCold, { usd: fmtCost(ho.estimateUsd) })}</Text>
+        <Box flexDirection="row" gap={1} flexWrap="wrap">
+          <Button key="ho-continue" label={s.handoffContinue} variant="primary" onPress={() => confirmHandoff($)} />
+          <Button key="ho-cancel" label={s.handoffCancel} plain onPress={() => cancelHandoff($)} />
+        </Box>
+      </Box>
+    )
+  }
+  if (ho.status === 'running') {
+    return (
+      <Box flexDirection="column" gap={1}>
+        {head}
+        <Text>
+          {s.handoffRunning} <Text dimColor>{fmtLeft(Math.max(0, at - ho.startedAt))}</Text>
+        </Text>
+        <Box flexDirection="row" gap={1} flexWrap="wrap">
+          <Button key="ho-cancel" label={s.handoffCancel} plain onPress={() => cancelHandoff($)} />
+        </Box>
+      </Box>
+    )
+  }
+  if (ho.status === 'error') {
+    return (
+      <Box flexDirection="column" gap={1}>
+        {head}
+        <Text color={TONE_COLOR.red}>{ho.error}</Text>
+        <Box flexDirection="row" gap={1} flexWrap="wrap">
+          {again}
+        </Box>
+      </Box>
+    )
+  }
+  const Md = ui.Markdown
+  return (
+    <Box flexDirection="column" gap={1}>
+      {head}
+      <Box flexDirection="row" gap={1} flexWrap="wrap">
+        <Button key="ho-copy" label={s.handoffCopy} variant="primary" onPress={(p: { surface?: RenderSurface }) => copyText($, ho.text, p?.surface, s.handoff)} />
+        <Button key="ho-save" label={ho.savedPath ? `${s.handoffSave} ✓` : s.handoffSave} onPress={() => saveHandoff($)} />
+        <Button key="ho-copy-opening" label={s.handoffCopyOpening} onPress={(p: { surface?: RenderSurface }) => copyText($, ho.opening, p?.surface, s.handoffOpening)} />
+        {again}
+      </Box>
+      <Text dimColor>
+        {fill(s.handoffCost, { usd: fmtCost(ho.usd), cached: fmtTokens(ho.cacheRead) })}
+        {ho.savedPath ? ` · ${fill(s.handoffSavedShort, { path: ho.savedPath })}` : ''}
+      </Text>
+      {Md ? <Md key="ho-note" text={ho.text} /> : <Text>{ho.text}</Text>}
     </Box>
   )
 }
@@ -1127,7 +1224,7 @@ function topRow(ui: UI, $: EngineInterface, v: View, size: Size, isUp: boolean, 
       {isCritical && size.isSvg ? iconEl(ui, 'compact', 'red', size) : null}
       {isCritical ? <Button key="cockpit-compact" label={size.isSvg ? s.compact : `🗜️ ${s.compact}`} variant="primary" onPress={() => compactNow($)} /> : null}
       {isCritical && size.isSvg ? iconEl(ui, 'handoff', 'orange', size) : null}
-      {isCritical ? <Button key="cockpit-handoff" label={size.isSvg ? s.handoff : `🧳 ${s.handoff}`} onPress={() => runHandoff($)} /> : null}
+      {isCritical ? <Button key="cockpit-handoff" label={size.isSvg ? s.handoff : `🧳 ${s.handoff}`} onPress={() => startHandoff($)} /> : null}
       {below as never}
     </Box>
   )
@@ -1141,7 +1238,7 @@ function guardButtons(ui: UI, $: EngineInterface, v: View, size: Size) {
       {v.level === 'critical' && size.isSvg ? iconEl(ui, 'compact', 'red', size) : null}
       {v.level === 'critical' ? <Button key="cockpit-compact" label={size.isSvg ? s.compact : `🗜️ ${s.compact}`} variant="primary" onPress={() => compactNow($)} /> : null}
       {v.level === 'critical' && size.isSvg ? iconEl(ui, 'handoff', 'orange', size) : null}
-      {v.level === 'critical' ? <Button key="cockpit-handoff" label={size.isSvg ? s.handoff : `🧳 ${s.handoff}`} onPress={() => runHandoff($)} /> : null}
+      {v.level === 'critical' ? <Button key="cockpit-handoff" label={size.isSvg ? s.handoff : `🧳 ${s.handoff}`} onPress={() => startHandoff($)} /> : null}
       <Button key="cockpit-full" label={size.isSvg ? s.fullList : `📋 ${s.fullList}`} plain onPress={() => toggleTokens($)} />
     </Box>
   )
