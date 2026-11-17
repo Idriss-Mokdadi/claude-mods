@@ -1,0 +1,26 @@
+{
+  "name": "launcher",
+  "version": "0.1.0",
+  "description": "Launcher band: one compact row of answer-mode buttons (SHORT, STUDY, DEEP, TECH ...), EN/FR/AR reply buttons, shortcuts to your other mods when installed, and a Glossary pane built from this chat's STUDY terms. Zero tokens by itself.",
+  "author": {
+    "name": "Mohamed Idriss Mokdadi",
+    "url": "https://github.com/Idriss-Mokdadi"
+  },
+  "license": "MIT",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "sticky": {
+      "type": "boolean",
+      "title": "Sticky mode",
+      "description": "Off by default. When on, a mode or language you pick is added to every prompt you send until you clear it (about 3 tokens per prompt)",
+      "default": false
+    },
+    "language": {
+      "type": "string",
+      "title": "Language",
+      "description": "auto follows Claude Code's language setting, then the system locale; en, fr or ar (right to left)",
+      "default": "auto",
+      "options": ["auto", "en", "fr", "ar"]
+    }
+  }
+}
