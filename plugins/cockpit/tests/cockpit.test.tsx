@@ -153,6 +153,15 @@ const say = (surface: 'terminal' | 'desktop', re: RegExp): RegExp =>
 const crabs = async (ui: { findAll: (q: { type: string }) => Promise<{ props: Record<string, unknown> }[]> }) =>
   (await ui.findAll({ type: 'Svg' })).map(x => String(x.props.alt)).filter(a => /^[a-z_]+ (green|yellow|orange|red|cold)$/.test(a))
 
+// Since Claude Code 2.1.326 the test kit draws a stand-in for the bands beneath
+// (a Text tagged with the test's own part), and cockpit wraps itself and that
+// stand-in in one column. Tests look at cockpit's own tree only.
+const own = (tree: unknown): unknown => {
+  const el = tree as { children?: unknown[] }
+  const kids = el?.children ?? []
+  const last = kids[kids.length - 1] as { part?: { plugin?: string } } | undefined
+  return kids.length === 2 && last?.part?.plugin === 'test' ? kids[0] : tree
+}
 const band = ($: Engine, surface: 'terminal' | 'desktop') => $.ui.mount({ plugin: PLUGIN, surface, ...BAND } as never)
 
 for (const surface of SURFACES) {
@@ -176,12 +185,14 @@ for (const surface of SURFACES) {
     await submit($, 'Fix the bug in parser.py where empty lines crash the import')
     const ui = await band($, surface)
     await ui.press({ key: 'cockpit-usage' })
-    for (const label of [/🧠 Context/, /⏱️ 5-hour limit.*resets in 2h 13m/, /📅 7-day limit/, /💵 Session cost.*\$1\.23 of \$5\.00 budget/, /🧊 Cache/, /🤖 Model & effort/])
+    for (const label of [/🧠 Context/, /⏱️ 5-hour limit.*resets in 2h 13m/, /📅 7-day limit/, /💵 Session cost \$1\.23/, /🧊 Cache/, /🤖 Model & effort/])
       expect(await ui.find({ type: 'Text', text: say(surface, label) })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /What uses your tokens/ })).toBeUndefined()
+    // Session cost is the amount alone: no budget text.
+    expect(await ui.find({ type: 'Text', text: /budget/ })).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: /Top tools/ })).toBeUndefined()
     // The top row, then one row per item.
-    const root = (await ui.drawn()) as unknown as { children: unknown[] }
+    const root = own(await ui.drawn()) as { children: unknown[] }
     expect(root.children.length).toBe(7)
     // Collapsing again; the choice is remembered across sessions.
     expect(w.store.get('cockpit.expanded')).toBe(true)
@@ -226,7 +237,7 @@ for (const surface of SURFACES) {
     expect(await ui.find({ key: 'cockpit-compact' })).toBeDefined()
     expect(await ui.find({ key: 'cockpit-handoff' })).toBeDefined()
     // On the top row, right after Full list.
-    const root = (await ui.drawn()) as unknown as { children: { children: { props?: { key?: string } }[] }[] }
+    const root = own(await ui.drawn()) as { children: { children: { props?: { key?: string } }[] }[] }
     const keys = (root.children[0]?.children ?? []).map(c => c.props?.key).filter(Boolean)
     expect(keys.slice(0, 4)).toEqual(['cockpit-usage', 'cockpit-full', 'cockpit-compact', 'cockpit-handoff'])
     await ui.unmount()
@@ -549,7 +560,7 @@ for (const [cols, maxRows, ctx] of [[60, 12, 62], [60, 8, 62], [60, 6, 62], [140
     await measure($, w, ctx, 74)
     const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', component: 'AbovePrompt', props: { ...BAND.props, bodyColumns: cols, maxRows } } as never)
     await ui.press({ key: 'cockpit-usage' })
-    const rows = bandRows(await ui.drawn(), cols)
+    const rows = bandRows(own(await ui.drawn()), cols)
     expect(rows).toBeLessThanOrEqual(maxRows)
     // Every item is still there, and the Switch button with it.
     for (const label of [/Context|ctx/, /5-hour limit|5h/, /7-day limit|7d/, /Session cost|\$1\.23/, /Model & effort|→ haiku·low/])

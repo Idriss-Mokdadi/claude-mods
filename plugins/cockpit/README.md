@@ -19,7 +19,7 @@ On desktop and mobile every line carries a **pixel crab** holding the line's pro
 
 ![Collapsed band](docs/v05-collapsed-60col-dark.png)
 
-**Expanded** (press Usage; press again to collapse; the choice is remembered across sessions): the same top row (plus **Compact now** and **Handoff** at the critical level), then one row per item, the bar inline at the right: Context · 5-hour limit (reset time) · 7-day limit · Session cost (against a budget) · Cache (`m:ss left`, the bar drains) · Model & effort (current vs suggested, why, and **Switch** on the same row when it fits).
+**Expanded** (press Usage; press again to collapse; the choice is remembered across sessions): the same top row (plus **Compact now** and **Handoff** at the critical level), then one row per item, the bar inline at the right: Context · 5-hour limit (reset time) · 7-day limit · Session cost (the amount only, no bar) · Cache (`m:ss left`, the bar drains) · Model & effort (current vs suggested, why, and **Switch** on the same row when it fits).
 
 ![Expanded band](docs/v05-expanded-140col-dark.png)
 
@@ -63,7 +63,6 @@ Bar colours: green under 50%, yellow 50-70%, orange 70-85%, red over 85%.
 | --- | --- | --- |
 | `warnPercent` | 70 | Warning level, percent. |
 | `criticalPercent` | 85 | Critical level, percent. |
-| `costBudgetUsd` | 5 | The cost bar is full at this amount. |
 | `advisor` | true | Show the model/effort advisor. |
 | `advisorAi` | false | One Haiku check when the rule score is ambiguous (costs a little per check). |
 | `cacheTtl` | auto | `auto`, `5m` or `1h`. |

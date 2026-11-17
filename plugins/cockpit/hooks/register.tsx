@@ -63,7 +63,6 @@ type Opts = {
   maxPings: number
   advisor: boolean
   advisorAi: boolean
-  costBudget: number
   debug: boolean
   language: string
 }
@@ -83,7 +82,6 @@ export const readOpts = (o: PluginOptions): Opts => {
     maxPings: Math.round(num(o.keepAliveMaxPings, 3, 0, 20)),
     advisor: o.advisor !== false,
     advisorAi: o.advisorAi === true,
-    costBudget: num(o.costBudgetUsd, 5, 0.01, 100_000),
     debug: o.debug === true,
     language: typeof o.language === 'string' ? o.language : 'auto',
   }
@@ -472,6 +470,8 @@ type Line = {
   color?: string
   end?: string
   marker?: number
+  // A line with no bar (the session cost).
+  noBar?: boolean
 }
 
 const NEUTRAL = '#378ADD'
@@ -532,10 +532,9 @@ async function viewOf($: EngineInterface): Promise<View> {
     lines.push({ key: kind, crab: crabFor(t), emoji, icon: kind, label, value: `${Math.round(l.percent)}%${reset ? ` · ${s.resetsIn} ${reset}` : ''}`, pct: l.percent, tone: t })
   }
   if (snap?.costUsd !== null && snap?.costUsd !== undefined) {
-    const pct = (snap.costUsd / opts.costBudget) * 100
-    const t = toneOf(pct, w, k)
+    // Cost has no budget: the line shows the amount alone, with no bar.
     const extra = c.pingUsd ? ` · ${s.pings} ≈${fmtCost(c.pingUsd)}` : ''
-    lines.push({ key: 'cost', crab: crabFor(t), emoji: '💵', icon: 'cost', label: s.lineCost, value: `${fmtCost(snap.costUsd)} ${fill(s.ofBudget, { usd: fmtCost(opts.costBudget) })}${extra}`, pct, tone: t })
+    lines.push({ key: 'cost', crab: 'happy', emoji: '💵', icon: 'cost', label: s.lineCost, value: `${fmtCost(snap.costUsd)}${extra}`, pct: 0, tone: null, end: '', noBar: true })
   }
   const ttl = ttlOf(c, snap)
   const idle = c.touchedAt ? at - c.touchedAt : 0
@@ -974,7 +973,7 @@ function bandRow(ui: UI, $: EngineInterface, v: View, r: BandRow, size: Size, ha
             ))}
           </Text>
         </Box>
-        {hasBars ? (
+        {hasBars && !lead.noBar ? (
           <Box flexShrink={0}>
             {size.isSvg && Svg ? (
               <Svg source={barSvg(BAR_PX, lead.pct, lineColor(lead), lead.marker)} alt={altOf(lead)} width={BAR_PX} height={10} />
@@ -1092,7 +1091,7 @@ function lineEl(ui: UI, l: Line, size: Size, extra: unknown = null) {
           {extra as never}
         </Box>
       ) : null}
-      {size.isSvg && Svg ? (
+      {l.noBar ? null : size.isSvg && Svg ? (
         <Svg source={barSvg(size.W, l.pct, lineColor(l), l.marker)} alt={altOf(l)} width={size.W} height={10} />
       ) : (
         <Text color={lineColor(l)}>{bar(l.pct, size.barW)}</Text>
