@@ -1,0 +1,32 @@
+{
+  "name": "taskboard",
+  "version": "0.1.0",
+  "description": "Live task board in the crab style: a band with the current task, a 3/7 bar and a Tasks button; a Tasks pane with one crab per task (sleeping, working with the tool it uses, happy, angry), a live activity line, a mini Gantt timeline and per-task tool-call and token estimates. Hooks only, zero tokens.",
+  "author": {
+    "name": "Mohamed Idriss Mokdadi",
+    "url": "https://github.com/Idriss-Mokdadi"
+  },
+  "license": "MIT",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "language": {
+      "type": "string",
+      "title": "Language",
+      "description": "auto follows Claude Code's language setting, then the system locale; en, fr or ar (right to left)",
+      "default": "auto",
+      "options": ["auto", "en", "fr", "ar"]
+    },
+    "subagentTasks": {
+      "type": "boolean",
+      "title": "Show subagent tasks",
+      "description": "List the tasks a subagent creates in their own group under the main tasks",
+      "default": true
+    },
+    "showTimeline": {
+      "type": "boolean",
+      "title": "Timeline chart",
+      "description": "Show the mini Gantt chart (start to end of each task) in the Tasks pane",
+      "default": true
+    }
+  }
+}
