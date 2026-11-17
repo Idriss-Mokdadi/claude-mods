@@ -169,29 +169,6 @@ export function attribute(messages: readonly Msg[]): { rows: AttrRow[]; userToke
   return { rows, userTokens, replyTokens }
 }
 
-// Files the transcript edited or wrote, for the handoff note.
-export function filesTouched(messages: readonly Msg[]): string[] {
-  const out = new Set<string>()
-  for (const m of messages)
-    for (const u of m.toolUses ?? []) {
-      if (!/^(Edit|Write|MultiEdit|NotebookEdit)$/.test(u.tool)) continue
-      const p = u.input?.file_path ?? u.input?.notebook_path
-      if (typeof p === 'string') out.add(p)
-    }
-  return [...out]
-}
-
-// The transcript as plain text for the handoff call, the newest part kept.
-export function transcriptText(messages: readonly Msg[], max = 60_000): string {
-  const parts = messages.map(m => {
-    const tools = (m.toolUses ?? []).map(u => `  [tool ${u.tool}] ${JSON.stringify(u.input ?? {}).slice(0, 200)}`).join('\n')
-    return `${m.role.toUpperCase()}: ${m.text.slice(0, 4000)}${tools ? '\n' + tools : ''}`
-  })
-  let out = parts.join('\n\n')
-  if (out.length > max) out = '[earlier part cut]\n' + out.slice(out.length - max)
-  return out
-}
-
 // ---------------------------------------------------------------------------
 // Formatting.
 

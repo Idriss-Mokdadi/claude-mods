@@ -374,9 +374,10 @@ const batchFlow = (list: AgentRun[], current: number): Source | null => {
   }
 }
 
-const bandSource = (f: Flow | null, tasks: TaskItem[], list: AgentRun[], current: number, dismissed: string): Source | null => {
+// `showTasks` is the `taskBar` option, off while the taskboard mod's /tasks shows the list.
+const bandSource = (f: Flow | null, tasks: TaskItem[], list: AgentRun[], current: number, dismissed: string, showTasks: boolean): Source | null => {
   if (f) return { key: 'flow', flow: f }
-  const derived = listFlow(tasks) ?? batchFlow(list, current)
+  const derived = (showTasks ? listFlow(tasks) : null) ?? batchFlow(list, current)
   return derived && derived.key !== dismissed ? derived : null
 }
 
@@ -559,6 +560,28 @@ ${title ? `<text class="t" ${titleAt} y="${H / 2 + 4.5}" font-family="${FONT}" f
 </g>
 <text class="m" ${percentAt} font-family="${FONT}" font-size="12.5" font-variant-numeric="tabular-nums">${percent}</text>
 ${CRAB_CSS}${crab(rx(W - CRAB_W + 1, crabW), 0, 'other', false, isWorking, 0.8, rtl)}
+</svg>`
+}
+
+// The collapsed band (`isCollapsed`): one row, crab, title and the count, no bar.
+// The drawing is as wide as its words, up to `maxW`.
+const collapsedSvg = (f: Flow, maxW: number, isWorking: boolean): string => {
+  const rtl = isRtl()
+  const count = `${label(f)} · ${Math.round(ratio(f) * 100)}%`
+  const countW = Math.ceil(textWidth(count, 12.5))
+  const crabW = CRAB_BOX * 0.8
+  const titleMax = Math.max(40, maxW - crabW - countW - 20)
+  const title = fitText(f.title, 13, titleMax)
+  const W = Math.min(maxW, Math.ceil(crabW + 6 + textWidth(title, 13) + 12 + countW + 2))
+  const x = (at: number, w: number): number => (rtl ? W - at - w : at)
+  const titleX = crabW + 6
+  const countX = titleX + textWidth(title, 13) + 12
+  const anchor = rtl ? ' direction="rtl" text-anchor="start"' : ''
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+<style>.t{fill:#1f1f1f}.m{fill:#8a8a8a}@media (prefers-color-scheme: dark){.t{fill:#ececec}.m{fill:#9a9a9a}}</style>
+${CRAB_CSS}${crab(x(0, crabW), 0, 'other', false, isWorking, 0.8, rtl)}
+<text class="t" x="${rtl ? W - titleX : titleX}" y="${H / 2 + 4.5}"${anchor} font-family="${FONT}" font-size="13" font-weight="500">${xml(title)}</text>
+<text x="${rtl ? W - countX : countX}" y="${H / 2 + 4.5}"${anchor} font-family="${FONT}" font-size="12.5" font-weight="600" font-variant-numeric="tabular-nums" fill="${f.isFinished ? DONE : ACCENT}">${xml(count)}</text>
 </svg>`
 }
 
@@ -1049,6 +1072,20 @@ async function checkBudget($: EngineInterface, budget: Budget, agentId: string):
   }
 }
 
+// The taskboard mod owns the task list's display when its /tasks command is there.
+// Only a plugin's /tasks counts: a built-in command of that name is not the board.
+async function hasTaskboard($: EngineInterface): Promise<boolean> {
+  try {
+    const commands = await $.command.list()
+    return commands.some(c => (c.name === 'tasks' || c.name === 'taskboard') && c.source === 'plugin' && (c.plugin === undefined || c.plugin === 'taskboard'))
+  } catch {
+    return false
+  }
+}
+
+// Module scope is fine: session.start and each new task check it again.
+let taskboard = false
+
 const TASK_STATUS: readonly TaskItem['status'][] = ['pending', 'in_progress', 'completed']
 
 export const register: Register = (on, options) => {
@@ -1060,6 +1097,7 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     lang = await detectLang($, options.language)
+    taskboard = await hasTaskboard($)
     await $.tool.register({
       name: 'progress',
       description:
@@ -1178,6 +1216,8 @@ export const register: Register = (on, options) => {
     const task = (result.result as { task?: { id?: unknown; subject?: unknown } } | undefined)?.task
     if (result.isError || result.deny !== undefined || !task || typeof task.id !== 'string') return result
     const item: TaskItem = { id: task.id, subject: clip(String(task.subject ?? ''), MAX_TITLE), status: 'pending' }
+    // A board loaded after this mod's start is found here, before its list could show.
+    if (options.taskBar === true) taskboard = await hasTaskboard($)
     await update($, taskList, list => [...list.filter(t => t.id !== item.id), item].slice(-MAX_LIST))
     return result
   })
@@ -1522,7 +1562,8 @@ export const register: Register = (on, options) => {
     const saved = await read($, flow)
     const list = await read($, agents)
     const p: Panel = await read($, panel)
-    const source = bandSource(saved, await read($, taskList), list, await read($, batch), p.dismissed ?? '')
+    const showTasks = options.taskBar === true && !taskboard
+    const source = bandSource(saved, await read($, taskList), list, await read($, batch), p.dismissed ?? '', showTasks)
     if (!source) return next(e)
     const f = source.flow
     // Draw this row with the other mods' bands beneath it. Claude Code's own placeholder ({ type: 'engine' }) is
@@ -1548,6 +1589,43 @@ export const register: Register = (on, options) => {
         }
       />
     )
+
+    // Collapsed: one row with the crab, the title and the count; no bar, no title line.
+    // (`isCollapsed` is a band prop from Claude Code 2.1.326 on; older builds leave it out.)
+    const isCollapsed = (e.props as { isCollapsed?: boolean }).isCollapsed === true
+    if (isCollapsed) {
+      const count = `${label(f)} · ${percent}`
+      if (e.surface !== 'terminal' && 'Svg' in ui) {
+        const { Svg } = ui
+        const maxW = Math.max(140, Math.min(1600, (e.props.bodyColumns || 100) * 8 - 96))
+        const source = collapsedSvg(f, maxW, isWorking)
+        const width = Number(/width="(\d+)"/.exec(source)?.[1] ?? maxW)
+        return (
+          <Box flexDirection="column">
+            <Box flexDirection={isRtl() ? 'row-reverse' : 'row'} alignItems="center" gap={1}>
+              <Svg source={source} alt={`${f.title}: ${count}`} width={width} height={H} />
+              {crewButton}
+              {dismiss}
+            </Box>
+            {below}
+          </Box>
+        )
+      }
+      return (
+        <Box flexDirection="column">
+          <Box flexDirection="row" gap={1}>
+            <Text color={CLAY}>▣</Text>
+            <Text wrap="truncate-end">{f.title}</Text>
+            <Text bold color={f.isFinished ? DONE : ACCENT}>
+              {count}
+            </Text>
+            {crewButton}
+            {dismiss}
+          </Box>
+          {below}
+        </Box>
+      )
+    }
 
     // The terminal's element table is completed with an `Svg` that draws nothing: test the surface too.
     if (e.surface !== 'terminal' && 'Svg' in ui) {

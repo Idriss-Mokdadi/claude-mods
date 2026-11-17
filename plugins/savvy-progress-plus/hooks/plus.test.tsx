@@ -7,7 +7,7 @@ import type { Engine } from 'claude-code/testing'
 
 const PLUGIN = 'savvy-progress-plus'
 const PROGRESS = 'mcp__savvy-progress-plus__progress'
-const band = (bodyColumns = 100) => ({ hasSurvey: false, isWorking: false, maxRows: 4, bodyColumns, scroll: { offset: 0, bodyRows: 4 }, view: {} })
+const band = (bodyColumns = 100, isCollapsed = false) => ({ hasSurvey: false, isCollapsed, isWorking: false, maxRows: 4, bodyColumns, scroll: { offset: 0, bodyRows: 4 }, view: {} })
 const pane = (bodyColumns = 60) => ({ title: '', isFocused: false, bodyColumns, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} }) as const
 
 type Usage = { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number }
@@ -59,10 +59,14 @@ const step = async ($: Engine, agentId: string, usage: Usage | null, effort?: st
 const finish = ($: Engine, agentId: string) =>
   ($.turn.complete as (e: unknown) => Promise<unknown>)({ agentId, reason: 'answer', answer: 'ok' })
 
-const bandText = async ($: Engine, surface: 'terminal' | 'desktop' | 'mobile', columns = 100) => {
-  const ui = await $.ui.mount({ plugin: PLUGIN, surface, component: 'AbovePrompt', props: band(columns) })
-  const svg = await ui.findAll({ type: 'Svg' })
-  const texts = await ui.findAll({ type: 'Text' })
+const mine = (el: unknown): boolean => (el as { part?: { plugin?: string } }).part?.plugin !== 'test'
+
+const bandText = async ($: Engine, surface: 'terminal' | 'desktop' | 'mobile', columns = 100, isCollapsed = false) => {
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface, component: 'AbovePrompt', props: band(columns, isCollapsed) })
+  // Since Claude Code 2.1.326 the kit draws a stand-in band beneath, tagged with the
+  // test's own part: only this mod's own elements are read.
+  const svg = (await ui.findAll({ type: 'Svg' })).filter(mine)
+  const texts = (await ui.findAll({ type: 'Text' })).filter(mine)
   const out = [...svg.map(el => `${String(el.props.alt)}\n${String(el.props.source)}`), ...texts.map(el => el.text ?? '')].join('\n')
   await ui.unmount()
   return out
@@ -126,9 +130,12 @@ for (const [language, word] of [['en', 'Tasks'], ['ru', 'Задачи'], ['he', 
 
 // --- 2. The band for any multi-step work ------------------------------------
 
+const TASK_BAR = { options: { taskBar: true } } as const
+
 // The engine's TaskCreate and TaskUpdate, answered as the built-in tools answer.
-const taskTools = (on: On) => {
-  drawsNothing(on)
+// `draw` false when `engine` already stands for the drawing beneath.
+const taskTools = (on: On, draw = true) => {
+  if (draw) drawsNothing(on)
   let n = 0
   on('tool.call', { tool: 'TaskCreate' }, (_$, e) => {
     const subject = (e as unknown as { subject: string }).subject
@@ -141,7 +148,7 @@ const taskTools = (on: On) => {
 }
 
 for (const surface of ['terminal', 'desktop'] as const) {
-  test(`${surface}: the task list drives the band`, async ($, on) => {
+  test(`${surface}: with taskBar on, the task list drives the band`, TASK_BAR, async ($, on) => {
     taskTools(on)
     await $.tool.call({ tool: 'TaskCreate', subject: 'Read the spec', description: 'd' } as never)
     // One task is not multi-step work: no band yet.
@@ -183,7 +190,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
   })
 }
 
-test('band: a savvy-flow report wins over the task list', async ($, on) => {
+test('band: a savvy-flow report wins over the task list', TASK_BAR, async ($, on) => {
   taskTools(on)
   await $.tool.call({ tool: 'TaskCreate', subject: 'A', description: 'd' } as never)
   await $.tool.call({ tool: 'TaskCreate', subject: 'B', description: 'd' } as never)
@@ -191,7 +198,7 @@ test('band: a savvy-flow report wins over the task list', async ($, on) => {
   expect(await bandText($, 'terminal')).toContain('Tasks 3/5')
 })
 
-test('band: ✕ hides a task list until a new list starts', async ($, on) => {
+test('band: ✕ hides a task list until a new list starts', TASK_BAR, async ($, on) => {
   taskTools(on)
   await $.tool.call({ tool: 'TaskCreate', subject: 'A', description: 'd' } as never)
   await $.tool.call({ tool: 'TaskCreate', subject: 'B', description: 'd' } as never)
@@ -201,6 +208,57 @@ test('band: ✕ hides a task list until a new list starts', async ($, on) => {
   expect(await bandText($, 'terminal')).toBe('')
   // A failed update changes nothing either.
   await $.tool.call({ tool: 'TaskUpdate', taskId: '1', status: 'completed' } as never)
+  expect(await bandText($, 'terminal')).toBe('')
+})
+
+const twoTasks = async ($: Engine) => {
+  await $.tool.call({ tool: 'TaskCreate', subject: 'Read the spec', description: 'd' } as never)
+  await $.tool.call({ tool: 'TaskCreate', subject: 'Write the code', description: 'd' } as never)
+  await $.tool.call({ tool: 'TaskUpdate', taskId: '1', status: 'completed' } as never)
+}
+
+// The commands the session lists, as `$.command.list()` answers them.
+const commands = (on: On, list: { name: string; source: string; plugin?: string }[]) =>
+  on('command.list', () => ({ value: list.map(c => ({ description: '', ...c })) }) as never)
+
+for (const surface of ['terminal', 'desktop'] as const) {
+  test(`${surface}: taskBar is off by default: no task-list bar, subagent batches still show`, async ($, on) => {
+    engine(on)
+    taskTools(on, false)
+    await twoTasks($)
+    expect(await bandText($, surface)).toBe('')
+    await spawn($, 'One')
+    await spawn($, 'Two')
+    expect(await bandText($, surface)).toContain('Agents 0/2')
+  })
+
+  test(`${surface}: the taskboard mod's /tasks turns the task-list bar off even with taskBar on`, TASK_BAR, async ($, on) => {
+    taskTools(on)
+    commands(on, [{ name: 'tasks', source: 'plugin', plugin: 'taskboard' }])
+    await twoTasks($)
+    expect(await bandText($, surface)).toBe('')
+    // A savvy-flow report still draws.
+    await $.tool.call({ tool: PROGRESS, title: 'Flow', phase: 'delegate', total: 2, done: 1 } as never)
+    expect(await bandText($, surface)).toContain('Tasks 1/2')
+  })
+}
+
+test('band: a built-in /tasks command is not the taskboard', TASK_BAR, async ($, on) => {
+  taskTools(on)
+  commands(on, [{ name: 'tasks', source: 'builtin' }, { name: 'tasks-other', source: 'plugin', plugin: 'other' }])
+  await twoTasks($)
+  expect(await bandText($, 'terminal')).toContain('Tasks 1/2')
+})
+
+test('band: a taskboard found at session start hides the list too', TASK_BAR, async ($, on) => {
+  taskTools(on)
+  commands(on, [{ name: 'tasks', source: 'plugin' }])
+  mock.clock(on)
+  mock.env(on, {})
+  on('settings.read', async () => ({ value: {} }) as never)
+  on('session.start', async () => ({ cwd: '/repo' }) as never)
+  await $.session.start({ source: 'startup', cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
+  await twoTasks($)
   expect(await bandText($, 'terminal')).toBe('')
 })
 
@@ -382,4 +440,60 @@ test('rename: the command is /crew and the pane is crew, apart from the original
   expect(commands).toEqual(['crew'])
   expect(await $.command.run({ command: 'crew', args: 'open' } as never)).toMatchObject({ text: 'Crew panel opened.' })
   expect(opened).toEqual(['crew'])
+})
+
+// --- Collapsed band (isCollapsed, Claude Code 2.1.326) ---------------------
+
+for (const surface of ['terminal', 'desktop', 'mobile'] as const) {
+  test(`${surface}: collapsed, the band is one row: crab, title and count, no bar`, async ($, on) => {
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    await $.tool.call({ tool: PROGRESS, title: 'Ship it', phase: 'delegate', total: 4, done: 1 } as never)
+    const ui = await $.ui.mount({ plugin: PLUGIN, surface, component: 'AbovePrompt', props: band(42, true) })
+    const svgs = (await ui.findAll({ type: 'Svg' })).filter(mine)
+    const texts = (await ui.findAll({ type: 'Text' })).filter(mine).map(t => t.text ?? '')
+    if (surface === 'terminal') {
+      expect(svgs).toEqual([])
+      expect(texts).toEqual(['▣', 'Ship it', 'Tasks 1/4 · 25%'])
+    } else {
+      // One drawing, no title line above it even on a narrow phone row.
+      expect(texts).toEqual([])
+      expect(svgs.length).toBe(1)
+      const source = String(svgs[0]?.props.source)
+      expect(source).toContain('>Ship it</text>')
+      expect(source).toContain('Tasks 1/4 · 25%')
+      expect(source).toContain('class="c-other')
+      expect(source).toContain('prefers-reduced-motion: reduce')
+      expect(source).not.toContain('clipPath')
+    }
+    // Same row, so the crew button and ✕ stay.
+    expect(await ui.find({ key: 'crew' })).toBeDefined()
+    expect(await ui.find({ key: 'crew-dismiss' })).toBeDefined()
+  })
+
+  test(`${surface}: not collapsed, the band keeps its bar`, async ($, on) => {
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    await $.tool.call({ tool: PROGRESS, title: 'Ship it', phase: 'delegate', total: 4, done: 1 } as never)
+    const drawn = await bandText($, surface, 100, false)
+    if (surface === 'terminal') expect(drawn).toContain('░')
+    else expect(drawn).toContain('clipPath')
+    expect(drawn).toContain('Tasks 1/4')
+  })
+}
+
+test('collapsed: a finished subagent batch reads Done · 100%', async ($, on) => {
+  engine(on)
+  await spawn($, 'One')
+  await spawn($, 'Two')
+  await finish($, 'a1')
+  expect(await bandText($, 'terminal', 100, true)).toContain('Agents 1/2 · 50%')
+  await finish($, 'a2')
+  expect(await bandText($, 'desktop', 100, true)).toContain('Done · 100%')
+})
+
+test('collapsed: Arabic draws right to left', { options: { language: 'ar' } }, async ($, on) => {
+  await startIn($, on, {})
+  await $.tool.call({ tool: PROGRESS, title: 'إطلاق', phase: 'delegate', total: 4, done: 1 } as never)
+  const drawn = await bandText($, 'desktop', 100, true)
+  expect(drawn).toContain('direction="rtl"')
+  expect(drawn).toContain('المهام 1/4 · 25%')
 })
