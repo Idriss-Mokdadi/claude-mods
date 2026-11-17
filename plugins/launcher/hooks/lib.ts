@@ -36,8 +36,8 @@ export type CommandLike = { name: string; source?: string; plugin?: string }
 // The shortcut commands another mod serves. A built-in of the same name
 // (Claude Code has its own /tasks and /theme) does not count.
 // Where Claude Code keeps a name for itself, the mod serves another one:
-// taskboard falls back to /taskboard, companion to /lagoon.
-export const ALIASES: Record<string, readonly string[]> = { tasks: ['tasks', 'taskboard'], theme: ['theme', 'lagoon'] }
+// taskboard falls back to /taskboard, companion to /lagoon, guard to /undo-edit.
+export const ALIASES: Record<string, readonly string[]> = { tasks: ['tasks', 'taskboard'], theme: ['theme', 'lagoon'], undo: ['undo', 'undo-edit'] }
 
 // The plugin command that serves a shortcut, or undefined.
 export function resolveShortcut(list: readonly CommandLike[], command: string): string | undefined {

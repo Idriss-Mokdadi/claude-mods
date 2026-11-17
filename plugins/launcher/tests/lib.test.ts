@@ -148,5 +148,6 @@ test('a mod that falls back to another name still gets its shortcut', () => {
   expect(installedShortcuts(list)).toEqual(['tasks', 'theme'])
   expect(resolveShortcut(list, 'tasks')).toBe('taskboard')
   expect(resolveShortcut(list, 'theme')).toBe('lagoon')
+  expect(resolveShortcut([{ name: 'undo', source: 'builtin' }, { name: 'undo-edit', source: 'plugin', plugin: 'guard' }], 'undo')).toBe('undo-edit')
   expect(resolveShortcut([{ name: 'tasks', source: 'builtin' }], 'tasks')).toBeUndefined()
 })

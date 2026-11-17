@@ -11,6 +11,7 @@ Personal Claude Code mods by Mohamed Idriss Mokdadi. Private repo, personal use.
 | launcher | Mode buttons, EN/FR/AR, shortcuts to the other mods, glossary side panel (EN/FR/AR, no duplicates) | `/modes`, `/glossary` |
 | taskboard | One crab per task (sleeping, working with the tool it uses, done, failed), live activity line, mini timeline, time and estimated tokens per task | `/taskboard` (or `/tasks`) |
 | companion | Animated Lagoon in the left sidebar (5-hour bands, 7-day shells, cache sun/moon and sleeping crabs, one jellyfish per subagent, sandcastle tasks), mood crab, done alerts, celebrations | `/lagoon on\|off\|toggle` |
+| guard | Asks before destructive commands (rm -rf, force push, reset --hard, Remove-Item -Recurse…), blocks API keys and secrets from being written or echoed, checkpoints every edit | `/undo-edit`, `/checkpoints` |
 
 ## Install
 
@@ -30,6 +31,7 @@ Then install each mod:
 /plugin install launcher@claude-mods
 /plugin install taskboard@claude-mods
 /plugin install companion@claude-mods
+/plugin install guard@claude-mods
 ```
 
 Run `/reload-plugins` or start a new session to load them. Private repo: the machine needs GitHub access to it (`gh auth login` locally; in a cloud session, select this repo for the session).

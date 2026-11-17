@@ -40,6 +40,11 @@
       "name": "companion",
       "source": "./plugins/companion",
       "description": "Animated Lagoon in the left sidebar, mood crab, done alerts with a crab chirp, celebrations. /lagoon toggles the theme."
+    },
+    {
+      "name": "guard",
+      "source": "./plugins/guard",
+      "description": "Asks before destructive commands, blocks secrets from being written, checkpoints every edit with /undo-edit and /checkpoints."
     }
   ]
 }
