@@ -25,6 +25,11 @@
       "name": "memory",
       "source": "./plugins/memory",
       "description": "Spots your preferences and asks before saving each one to CLAUDE.md."
+    },
+    {
+      "name": "launcher",
+      "source": "./plugins/launcher",
+      "description": "Mode buttons (STUDY, TECH, DEEP…), EN/FR/AR, shortcuts to your mods, and a glossary side panel."
     }
   ]
 }

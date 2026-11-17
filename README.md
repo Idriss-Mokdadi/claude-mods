@@ -8,6 +8,7 @@ Personal Claude Code mods by Mohamed Idriss Mokdadi. Private repo, personal use.
 | savvy-progress-plus | Progress bar for multi-step work and a panel of subagents with model, effort fit, cost and budget warnings (fork of JohnnyVizz/claude-kit savvy-progress, MIT) | `/crew` |
 | workspace | Read-only file tree pane with marks on files Claude read, edited or created | `/tree` |
 | memory | Spots preferences in your prompts (EN/FR/AR) and asks before saving each one to `CLAUDE.md` | `/memory-list`, `/memory-hold`, `/memory-resume` |
+| launcher | Mode buttons, EN/FR/AR, shortcuts to the other mods, glossary side panel (EN/FR/AR, no duplicates) | `/modes`, `/glossary` |
 
 ## Install
 
@@ -24,6 +25,7 @@ Then install each mod:
 /plugin install savvy-progress-plus@claude-mods
 /plugin install workspace@claude-mods
 /plugin install memory@claude-mods
+/plugin install launcher@claude-mods
 ```
 
 Run `/reload-plugins` or start a new session to load them. Private repo: the machine needs GitHub access to it (`gh auth login` locally; in a cloud session, select this repo for the session).
