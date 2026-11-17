@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crab Themes Preview</title>
+<style>
+  :root { --bg:#0f0f10; --fg:#ece9e2; --mute:#a9a59c; --card:#18181a; --line:#2a2a2d; --acc:#d97757; }
+  :root[data-theme="light"] { --bg:#f6f4ef; --fg:#1d1b18; --mute:#5f5a52; --card:#ffffff; --line:#ddd8cf; }
+  @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { --bg:#f6f4ef; --fg:#1d1b18; --mute:#5f5a52; --card:#ffffff; --line:#ddd8cf; } }
+  * { box-sizing:border-box }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.45 system-ui, -apple-system, Segoe UI, sans-serif; padding:16px }
+  h1 { font-size:20px; margin:0 0 4px }
+  .sub { color:var(--mute); margin:0 0 12px; max-width:900px }
+  .bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:0 0 14px; position:sticky; top:0; background:var(--bg); padding:8px 0; z-index:5 }
+  button { background:var(--card); color:var(--fg); border:1px solid var(--line); border-radius:8px; padding:6px 10px; font:inherit; cursor:pointer }
+  button.on { border-color:var(--acc); color:var(--acc) }
+  .now { font-weight:600; margin-left:6px }
+  .grid { display:flex; flex-wrap:wrap; gap:18px }
+  .theme { width:240px }
+  .stage { position:relative; width:240px; height:640px; border-radius:12px; overflow:hidden; border:1px solid var(--line) }
+  canvas { width:240px; height:640px; image-rendering:pixelated; display:block }
+  .sessions { position:absolute; left:10px; right:10px; top:96px; padding:8px; border-radius:8px; background:rgba(10,14,22,.38); backdrop-filter:blur(1.5px); color:#f2efe8; font-size:13px; transition:opacity .3s }
+  .sessions div { padding:4px 6px; border-radius:5px } .sessions div.on { background:rgba(255,255,255,.14) }
+  .hide-sessions .sessions { opacity:0 }
+  .theme h2 { font-size:15px; margin:8px 0 2px }
+  .theme p { margin:0; color:var(--mute); font-size:12.5px }
+  table { border-collapse:collapse; margin:18px 0; font-size:13px; max-width:100% }
+  td, th { border:1px solid var(--line); padding:6px 8px; text-align:left; vertical-align:top }
+  .wrap { overflow-x:auto }
+  @media (max-width:560px){ .grid{justify-content:center} }
+</style>
+</head>
+<body>
+<h1>Crab themes: animated preview</h1>
+<p class="sub">Each strip is the left sidebar. All seven play the same scenario so you can compare. No context meter. Jellyfish = subagents (one per agent). Water/sky bands = 5-hour limit, filling part by part. 10 small items on the ground = 7-day limit. Light (day → night) and sleeping crabs = cache.</p>
+<div class="bar">
+  <button id="play" class="on">Pause</button>
+  <button id="sess">Hide session list</button>
+  <span class="now" id="now"></span>
+  <span id="jumps"></span>
+</div>
+<div class="grid" id="grid"></div>
+<div class="wrap">
+<table>
+  <tr><th>Event</th><th>What happens in every theme</th></tr>
+  <tr><td>Reading files</td><td>A crab digs, sand/dust flies</td></tr>
+  <tr><td>Editing files</td><td>A crab swings a hammer</td></tr>
+  <tr><td>Running commands</td><td>A crab types on a tiny terminal with a blinking cursor</td></tr>
+  <tr><td>Web search</td><td>A crab raises an antenna with signal waves</td></tr>
+  <tr><td>Subagents</td><td>One jellyfish per agent; pulses while working, turns green and floats away when done, flickers red on failure</td></tr>
+  <tr><td>Tasks</td><td>A building grows one level per step; finished = flag + celebration</td></tr>
+  <tr><td>5-hour limit</td><td>Bands fill from the bottom: green, yellow, orange, then red only on the top bands</td></tr>
+  <tr><td>7-day limit</td><td>10 small items on the ground light up one by one</td></tr>
+  <tr><td>Cache ageing</td><td>Light fades to night; crabs fall asleep one by one; all asleep = cache cold</td></tr>
+  <tr><td>Wrong model</td><td>A confused crab with a yellow "?"</td></tr>
+  <tr><td>Error / critical</td><td>A crab turns red and angry, steam puffs</td></tr>
+  <tr><td>Compact</td><td>Crabs squeeze into a bucket, then pop out</td></tr>
+  <tr><td>Handoff</td><td>A crab packs a suitcase and walks off the edge</td></tr>
+  <tr><td>All done</td><td>Theme celebration (fireworks, rocket launch, LED burst, aurora, eruption…)</td></tr>
+</table>
+</div>
+<script>
+// ---------- shared scenario ----------
+const STEPS = [
+  { t: 0,  name: 'Calm',               s: { h5: 10, d7: 20, cache: 1, tasks: 0, act: null, agents: [], mood: null } },
+  { t: 3,  name: 'Reading files',      s: { h5: 15, tasks: 1, act: 'read' } },
+  { t: 7,  name: 'Editing files',      s: { h5: 30, act: 'edit' } },
+  { t: 10, name: 'Running commands',   s: { h5: 38, act: 'bash' } },
+  { t: 13, name: 'Web search',         s: { h5: 44, act: 'web', tasks: 2 } },
+  { t: 16, name: '3 subagents start',  s: { act: null, agents: ['run', 'run', 'run'] } },
+  { t: 20, name: 'Subagents finish',   s: { h5: 55, d7: 30, agents: ['done', 'run', 'fail'], tasks: 3 } },
+  { t: 23, name: 'Subagents finish',   s: { agents: ['done', 'done', 'fail'] } },
+  { t: 25, name: 'Wrong model',        s: { h5: 68, agents: [], mood: 'q' } },
+  { t: 29, name: 'Warning (5h 76%)',   s: { h5: 76, d7: 40, mood: 'sweat' } },
+  { t: 32, name: 'Critical / error',   s: { h5: 92, d7: 50, mood: 'angry' } },
+  { t: 35, name: 'Compact',            s: { mood: 'compact', h5: 92 } },
+  { t: 39, name: 'Handoff',            s: { mood: 'handoff' } },
+  { t: 43, name: 'Idle: cache ageing', s: { mood: null, cache: 0.6 } },
+  { t: 45, name: 'Idle: cache ageing', s: { cache: 0.3 } },
+  { t: 47, name: 'Cache cold',         s: { cache: 0 } },
+  { t: 50, name: 'Back + all done',    s: { cache: 1, tasks: 5, h5: 60, mood: 'done' } },
+  { t: 56, name: 'loop',               s: {} },
+]
+const LOOP = 56
+let clock = 0, playing = true, showSess = true, last = performance.now()
+const state = () => {
+  const s = { h5: 10, d7: 20, cache: 1, tasks: 0, act: null, agents: [], mood: null, name: 'Calm', since: 0 }
+  for (const st of STEPS) if (st.t <= clock) { Object.assign(s, st.s); s.name = st.name; s.since = clock - st.t }
+  return s
+}
+
+// ---------- pixel helpers ----------
+const W = 120, H = 320, GROUND = 252
+const mix = (a, b, k) => { const p = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16)); const A = p(a), B = p(b); return '#' + A.map((v, i) => Math.round(v + (B[i] - v) * k).toString(16).padStart(2, '0')).join('') }
+const STAGE = i => (i < 5 ? '#3bb26a' : i < 7 ? '#e0b12a' : i < 8 ? '#f07418' : '#e5484d')
+const R = (c, x, y, w, h, col) => { c.fillStyle = col; c.fillRect(Math.round(x * 2) / 2, Math.round(y * 2) / 2, w, h) }
+const P = 1.5
+const CRAB = [
+  '.cc.......cc.',
+  'c..c.....c..c',
+  '.cc.......cc.',
+  '..b.......b..',
+  '..bbbbbbbbb..',
+  '..bkbbbbbkb..',
+  '..bbbbbbbbb..',
+  '..bbbmmmbbb..',
+]
+const LEGS = [['..b.b...b.b..', '.b..b...b..b.'], ['...bb...bb...', '..b..b.b..b..']]
+function crab(c, x, y, o = {}) {
+  const body = o.angry ? '#dc3b3f' : o.color || '#d97757'
+  const rows = CRAB.concat(LEGS[o.frame & 1])
+  rows.forEach((row, j) => [...row].forEach((ch, i) => {
+    if (ch === '.') return
+    let col = body
+    if (ch === 'k') col = o.sleep ? body : '#2a1a14'
+    if (ch === 'm') col = o.angry ? '#5a0f12' : '#7a3a26'
+    if (o.claws === false && (ch === 'c') && j < 3) return
+    R(c, x + i * P, y + j * P, P, P, col)
+  }))
+  if (o.sleep) { R(c, x + 3 * P, y + 5 * P, 2 * P, P, '#2a1a14'); R(c, x + 8 * P, y + 5 * P, 2 * P, P, '#2a1a14') }
+  if (o.sweat) { R(c, x + 12 * P, y + 3 * P + ((o.t * 4 | 0) % 4) * P, P, 2 * P, '#7ec8ff') }
+  if (o.angry) for (let k = 0; k < 3; k++) { const ph = (o.t * 1.5 + k / 3) % 1; R(c, x + (2 + k * 4) * P, y - 3 - ph * 10, 3, 3, `rgba(220,220,220,${1 - ph})`) }
+  if (o.q) { c.fillStyle = '#ffd34d'; c.font = 'bold 12px monospace'; c.fillText('?', x + 6, y - 3 + Math.sin(o.t * 5) * 1.5) }
+  if (o.sleep) { c.fillStyle = 'rgba(200,220,255,.9)'; c.font = '6px monospace'; const ph = (o.t * 0.6 + x * 0.01) % 1; c.fillText('z', x + 10 + ph * 4, y - 2 - ph * 8) }
+}
+function jelly(c, x, y, o) {
+  const pulse = 1 + Math.sin(o.t * 4 + x) * 0.12
+  const col = o.state === 'done' ? '#6ee7a2' : o.state === 'fail' ? ((o.t * 6 | 0) % 2 ? '#e5484d' : '#7a1f25') : o.color
+  c.globalAlpha = o.alpha ?? 1
+  c.fillStyle = col; c.globalAlpha *= 0.18; c.beginPath(); c.arc(x, y, 11 * pulse, 0, 7); c.fill(); c.globalAlpha = o.alpha ?? 1
+  c.beginPath(); c.ellipse(x, y, 6 * pulse, 5, 0, Math.PI, 0); c.fill()
+  for (let k = 0; k < 4; k++) {
+    for (let s = 0; s < 6; s++) R(c, x - 4 + k * 2.6 + Math.sin(o.t * 3 + k + s * 0.7) * (o.zig ? 1.5 : 0.8), y + s * 1.6, 1, 1.4, col)
+  }
+  c.globalAlpha = 1
+}
+const PARTS = new Map()
+function particles(c, key, spawn, t) {
+  let arr = PARTS.get(key); if (!arr) PARTS.set(key, (arr = []))
+  spawn(arr)
+  for (const p of arr) { p.x += p.vx; p.y += p.vy; p.vy += p.g || 0; p.life -= 0.02; c.globalAlpha = Math.max(0, p.life); R(c, p.x, p.y, p.s || 1, p.s || 1, p.col) }
+  c.globalAlpha = 1
+  for (let i = arr.length - 1; i >= 0; i--) if (arr[i].life <= 0) arr.splice(i, 1)
+}
+const burst = (arr, x, y, col, n = 18) => { for (let i = 0; i < n; i++) { const a = (i / n) * 6.283; arr.push({ x, y, vx: Math.cos(a) * 0.9, vy: Math.sin(a) * 0.9, g: 0.015, life: 1, col }) } }
+
+// ---------- themes ----------
+const THEMES = [
+  { id: 'lagoon', name: 'Lagoon', note: 'Ocean bands, shells, sun → moon, pink jellyfish, sandcastle, fireworks.',
+    day: '#7cc4e8', night: '#0b1022', band: '#0b3d5c', ground: '#c9a46b', groundNight: '#6d5a3a', jelly: '#ff9fe6',
+    sky(c, k, t) { const x = 12 + (1 - k) * 90; k > 0.05 ? (c.fillStyle = '#ffd34d', c.beginPath(), c.arc(x, 18 + (1 - k) * 16, 7, 0, 7), c.fill()) : (c.fillStyle = '#e9e4c8', c.beginPath(), c.arc(96, 16, 6, 0, 7), c.fill(), c.fillStyle = this.night, c.beginPath(), c.arc(99, 13, 5, 0, 7), c.fill()) },
+    decor(c, t, k) { for (const [x, h] of [[6, 7], [106, 9], [60, 5]]) for (let j = 0; j < h; j++) R(c, x + (Math.sin(t * 2 + j) > 0 ? 2 : 0), GROUND - (j + 1) * 5, 3, 5, k > 0.1 ? '#36a874' : '#1d5a40'); for (let i = 0; i < 8; i++) { const y = (GROUND - ((t * 12 + i * 37) % 200)); c.strokeStyle = 'rgba(190,233,255,.5)'; c.beginPath(); c.arc((i * 29) % W, y, 1.5 + (i % 2), 0, 7); c.stroke() } },
+    item(c, x, y, col) { R(c, x, y - 2, 7, 2, col); R(c, x + 1, y - 4, 5, 2, col); R(c, x + 2, y - 5, 3, 1, col) },
+    build(c, n, done, t) { for (let i = 0; i < n; i++) R(c, 92 + i * 2, GROUND - (i + 1) * 6, 22 - i * 4, 6, i % 2 ? '#e3c48a' : '#d8b878'); if (done) { R(c, 101, GROUND - 38, 1, 10, '#555'); R(c, 102, GROUND - 38, 6 + Math.sin(t * 6), 4, '#e5484d') } },
+    party(c, arr, t) { if ((t * 2 | 0) !== (arr.lt | 0)) { arr.lt = t * 2; burst(arr, 20 + Math.random() * 80, 40 + Math.random() * 60, ['#ffd34d', '#7ee0ff', '#ff8be0'][(Math.random() * 3) | 0]) } } },
+  { id: 'space', name: 'Space Crabs', note: 'Radiation belts, stars, satellite signal, violet space jellies, rocket built stage by stage, launch.',
+    day: '#1a1446', night: '#05040f', band: '#120d33', ground: '#8a8fa3', groundNight: '#3c3f4c', jelly: '#b48cff',
+    sky(c, k, t) { for (let i = 0; i < 14; i++) R(c, (i * 37) % W, (i * 13) % 40, 1, 1, `rgba(255,255,255,${0.4 + 0.6 * Math.abs(Math.sin(t + i))})`); const x = 20 + ((t * 10) % 90); R(c, x, 16, 6, 3, '#c9d1e0'); R(c, x - 4, 16, 3, 3, '#3a6fd8'); R(c, x + 7, 16, 3, 3, '#3a6fd8'); if (k > 0.05 && (t * (1 + k * 3) | 0) % 2) R(c, x + 2, 13, 2, 2, '#7cff9e'); if (k > 0.05) for (let w = 1; w <= Math.ceil(k * 3); w++) { c.strokeStyle = `rgba(124,255,158,${0.5 - w * 0.12})`; c.beginPath(); c.arc(x + 3, 16, w * 4 + ((t * 6) % 4), 0.5, 2.6); c.stroke() } },
+    decor(c, t) { c.fillStyle = '#c96b4a'; c.beginPath(); c.arc(18, 70, 9, 0, 7); c.fill(); c.strokeStyle = '#e8c08a'; c.beginPath(); c.ellipse(18, 70, 15, 4, -0.3, 0, 7); c.stroke(); for (let i = 0; i < 5; i++) R(c, 10 + i * 24, GROUND - 2, 6, 2, '#6d7184') },
+    item(c, x, y, col) { R(c, x + 3, y - 6, 1, 5, col); R(c, x + 1, y - 4, 5, 1, col); R(c, x + 2, y - 5, 3, 3, col) },
+    build(c, n, done, t) { const lift = done ? Math.min(140, ((t * 30) % 180)) : 0; const y0 = GROUND - lift; for (let i = 0; i < n; i++) R(c, 98, y0 - (i + 1) * 7, 9, 7, i === n - 1 ? '#e5484d' : '#e9ecf2'); if (n) { R(c, 95, y0 - 7, 3, 7, '#e5484d'); R(c, 107, y0 - 7, 3, 7, '#e5484d') } if (done) for (let k = 0; k < 4; k++) R(c, 100 + Math.random() * 5, y0 + k * 3, 2, 3, ['#ffd34d', '#f07418'][k % 2]) },
+    party(c, arr, t) { if (Math.random() < 0.3) arr.push({ x: 102, y: GROUND - ((t * 30) % 180), vx: (Math.random() - 0.5) * 0.6, vy: 1.2, life: 1, col: '#ffd34d' }) } },
+  { id: 'circuit', name: 'Circuit Board (IoT)', note: 'PCB bands with lit traces, LEDs, capacitor charge, electric jellies on the traces, chip soldered pin by pin, LED burst.',
+    day: '#14532d', night: '#05170c', band: '#0e3b21', ground: '#2b2b2b', groundNight: '#151515', jelly: '#5ff3ff', zig: true,
+    sky(c, k, t) { R(c, 8, 8, 14, 22, '#1f2a44'); R(c, 8, 8, 14, 3, '#9aa7c7'); R(c, 10, 30 - 20 * k, 10, 20 * k, '#5ff3ff'); c.fillStyle = '#cfe'; c.font = '6px monospace'; c.fillText('CAP', 26, 22) },
+    decor(c, t) { for (let i = 0; i < 6; i++) { const y = 60 + i * 30; R(c, 0, y, W, 1, 'rgba(200,170,90,.35)'); const p = (t * 40 + i * 30) % W; R(c, p, y - 1, 3, 3, 'rgba(255,230,140,.9)') } for (let i = 0; i < 4; i++) R(c, 20 + i * 26, 50, 1, GROUND - 50, 'rgba(200,170,90,.25)') },
+    item(c, x, y, col) { R(c, x + 1, y - 5, 5, 4, col); R(c, x + 2, y - 1, 1, 2, '#999'); R(c, x + 4, y - 1, 1, 2, '#999') },
+    build(c, n, done, t) { R(c, 92, GROUND - 22, 22, 18, '#222'); for (let i = 0; i < n * 2; i++) { R(c, 92 + i * 2.2, GROUND - 25, 1, 3, '#d9d9d9'); R(c, 92 + i * 2.2, GROUND - 4, 1, 3, '#d9d9d9') } c.fillStyle = '#9f9'; c.font = '5px monospace'; c.fillText('MCU', 96, GROUND - 11); if (done && (t * 4 | 0) % 2) R(c, 110, GROUND - 20, 2, 2, '#7cff9e') },
+    party(c, arr, t) { if ((t * 3 | 0) !== (arr.lt | 0)) { arr.lt = t * 3; for (let i = 0; i < 10; i++) arr.push({ x: Math.random() * W, y: 60 + Math.random() * 150, vx: 0, vy: 0, life: 1, s: 2, col: ['#ff4d4d', '#4dff88', '#4dc3ff', '#ffd34d'][i % 4] }) } } },
+  { id: 'reef', name: 'Coral Reef', note: 'Reef bands bleaching to red, pearls, sun rays, peach jellyfish, treasure chest that opens.',
+    day: '#5ec5d8', night: '#0a1830', band: '#0d5170', ground: '#e3c79a', groundNight: '#6d5d48', jelly: '#ffb38a',
+    sky(c, k, t) { for (let i = 0; i < 4; i++) { c.fillStyle = `rgba(255,255,220,${0.12 * k})`; c.beginPath(); c.moveTo(10 + i * 30, 0); c.lineTo(22 + i * 30, 0); c.lineTo(40 + i * 30 + Math.sin(t + i) * 4, GROUND); c.lineTo(28 + i * 30, GROUND); c.fill() } },
+    decor(c, t) { const cor = [['#ff6f91', 8], ['#ffa94d', 30], ['#c77dff', 58], ['#ff6f91', 80]]; for (const [col, x] of cor) for (let j = 0; j < 5; j++) { R(c, x + 2, GROUND - j * 5 - 5, 2, 5, col); if (j % 2) R(c, x + (j % 4 ? 4 : 0), GROUND - j * 5 - 7, 2, 3, col) } for (let f = 0; f < 3; f++) { const x = (t * (14 + f * 5) + f * 40) % (W + 20) - 10; R(c, x, 120 + f * 30, 5, 3, '#ffd34d'); R(c, x - 2, 121 + f * 30, 2, 1, '#ffd34d') } },
+    item(c, x, y, col) { R(c, x, y - 3, 7, 3, '#b48a6a'); R(c, x + 2, y - 5, 3, 3, col) },
+    build(c, n, done, t) { R(c, 92, GROUND - 14, 22, 12, '#8a5a2b'); R(c, 92, GROUND - 14, 22, 2, '#d4a017'); const open = done ? 8 : Math.max(0, n - 3) * 2; R(c, 92, GROUND - 16 - open, 22, 3, '#a06a35'); if (done) for (let i = 0; i < 6; i++) R(c, 96 + i * 3, GROUND - 18 - Math.abs(Math.sin(t * 3 + i)) * 8, 2, 2, '#ffd34d'); for (let i = 0; i < n; i++) R(c, 95 + i * 4, GROUND - 9, 2, 2, '#ffd34d') },
+    party(c, arr, t) { if (Math.random() < 0.5) arr.push({ x: 103, y: GROUND - 18, vx: (Math.random() - 0.5) * 0.4, vy: -0.8, life: 1.2, s: 2, col: 'rgba(200,240,255,.9)' }) } },
+  { id: 'arctic', name: 'Arctic', note: 'Ice layers turning to red meltwater, snowflakes, aurora that fades, icy jellies under the ice, igloo brick by brick.',
+    day: '#a9d6f5', night: '#071226', band: '#2f6c99', ground: '#eef6fb', groundNight: '#9fb2c2', jelly: '#d9f3ff',
+    sky(c, k, t) { for (let i = 0; i < 3; i++) { c.strokeStyle = ['rgba(120,255,180,', 'rgba(140,180,255,', 'rgba(220,140,255,'][i] + (0.15 + 0.5 * k) + ')'; c.lineWidth = 2; c.beginPath(); for (let x = 0; x <= W; x += 6) c.lineTo(x, 12 + i * 6 + Math.sin(t * 1.5 + x * 0.08 + i) * 4); c.stroke() } c.lineWidth = 1 },
+    decor(c, t) { for (let i = 0; i < 14; i++) { const y = (t * 10 + i * 23) % H; R(c, (i * 31 + Math.sin(t + i) * 3) % W, y, 1, 1, 'rgba(255,255,255,.85)') } R(c, 0, 46, W, 3, 'rgba(230,245,255,.8)') },
+    item(c, x, y, col) { R(c, x + 3, y - 7, 1, 7, col); R(c, x, y - 4, 7, 1, col); R(c, x + 1, y - 6, 1, 1, col); R(c, x + 5, y - 6, 1, 1, col); R(c, x + 1, y - 2, 1, 1, col); R(c, x + 5, y - 2, 1, 1, col) },
+    build(c, n, done, t) { for (let r = 0; r < n; r++) R(c, 90 + r * 2.5, GROUND - (r + 1) * 5, 26 - r * 5, 5, r % 2 ? '#ffffff' : '#dcecf7'); if (n >= 3) R(c, 100, GROUND - 7, 6, 7, '#36506b'); if (done) { c.fillStyle = `rgba(140,255,200,${0.3 + 0.3 * Math.sin(t * 4)})`; c.fillRect(85, GROUND - 40, 36, 14) } },
+    party(c, arr, t) { if ((t * 2 | 0) !== (arr.lt | 0)) { arr.lt = t * 2; burst(arr, 20 + Math.random() * 80, 30 + Math.random() * 40, ['#8cffc8', '#8cb4ff', '#dc8cff'][(Math.random() * 3) | 0], 14) } } },
+  { id: 'volcano', name: 'Volcano Island', note: 'Lava bands rising, smoke puffs, sunset, lava-lamp jellies, tiki hut built pole by pole, eruption.',
+    day: '#ff9a5a', night: '#1a0b12', band: '#3a1a14', ground: '#4a3a32', groundNight: '#2a201c', jelly: '#ff7a3d',
+    sky(c, k, t) { c.fillStyle = `rgba(255,220,120,${k})`; c.beginPath(); c.arc(90, 30 + (1 - k) * 18, 8, 0, 7); c.fill() },
+    decor(c, t) { c.fillStyle = '#3b2a24'; c.beginPath(); c.moveTo(0, 110); c.lineTo(22, 60); c.lineTo(34, 60); c.lineTo(58, 110); c.fill(); R(c, 22, 58, 12, 3, '#ff5a1f'); for (let i = 0; i < 4; i++) { const ph = (t * 0.4 + i / 4) % 1; c.fillStyle = `rgba(160,150,150,${0.6 - ph * 0.6})`; c.beginPath(); c.arc(28 + Math.sin(ph * 6) * 4, 55 - ph * 40, 3 + ph * 6, 0, 7); c.fill() } R(c, 104, GROUND - 30, 3, 30, '#6b4a2b'); for (let i = 0; i < 4; i++) R(c, 96 + i * 5, GROUND - 32 - Math.abs(i - 1.5), 6, 2, '#2f8a3f') },
+    item(c, x, y, col) { c.fillStyle = col; c.beginPath(); c.arc(x + 3, y - 3, 3, 0, 7); c.fill() },
+    build(c, n, done, t) { for (let i = 0; i < n; i++) R(c, 72 + i * 5, GROUND - 16, 2, 16, '#8a6a3a'); if (n >= 4) { c.fillStyle = '#c9a24a'; c.beginPath(); c.moveTo(68, GROUND - 16); c.lineTo(80, GROUND - 26); c.lineTo(96, GROUND - 16); c.fill() } },
+    party(c, arr, t) { if (Math.random() < 0.6) arr.push({ x: 28, y: 58, vx: (Math.random() - 0.5) * 1.4, vy: -1.4 - Math.random(), g: 0.04, life: 1, s: 2, col: ['#ff5a1f', '#ffd34d'][(Math.random() * 2) | 0] }) } },
+  { id: 'beach', name: 'Night Beach', note: 'Wave bands, stars, lighthouse beam, glowing teal jellies in the surf, bonfire built log by log, fireworks.',
+    day: '#2b3f73', night: '#04060f', band: '#0b2240', ground: '#9c8a6a', groundNight: '#4a4234', jelly: '#40f0d0',
+    sky(c, k, t) { for (let i = 0; i < 16; i++) R(c, (i * 41) % W, (i * 17) % 44, 1, 1, `rgba(255,255,255,${0.3 + 0.5 * Math.abs(Math.sin(t * 0.7 + i))})`); R(c, 104, 20, 6, 26, '#e8e2d6'); R(c, 104, 26, 6, 3, '#e5484d'); R(c, 104, 36, 6, 3, '#e5484d'); R(c, 103, 16, 8, 4, '#3a3a3a'); if (k > 0.05) { const a = t * (0.6 + k * 1.6); c.fillStyle = `rgba(255,240,170,${0.12 + 0.25 * k})`; c.beginPath(); c.moveTo(107, 18); c.lineTo(107 + Math.cos(a) * 140, 18 + Math.sin(a) * 30 - 10); c.lineTo(107 + Math.cos(a + 0.18) * 140, 18 + Math.sin(a + 0.18) * 30 + 10); c.fill() } },
+    decor(c, t, k) { for (let i = 0; i < 6; i++) { const y = GROUND - 8 - ((t * 6 + i * 5) % 30); c.strokeStyle = 'rgba(200,230,255,.25)'; c.beginPath(); for (let x = 0; x <= W; x += 4) c.lineTo(x, y + Math.sin(x * 0.2 + t * 2 + i) * 1.5); c.stroke() } for (let i = 0; i < 6 * k; i++) R(c, (i * 23 + Math.sin(t + i) * 8) % W, 200 + Math.cos(t * 1.3 + i) * 20, 1, 1, '#eaff7a') },
+    item(c, x, y, col) { R(c, x + 3, y - 5, 1, 1, col); R(c, x + 2, y - 4, 3, 1, col); R(c, x + 1, y - 3, 5, 1, col); R(c, x + 2, y - 2, 1, 1, col); R(c, x + 4, y - 2, 1, 1, col) },
+    build(c, n, done, t) { for (let i = 0; i < n; i++) R(c, 92 + (i % 2) * 6, GROUND - 3 - i * 3, 14, 2, '#6b4a2b'); if (done) for (let i = 0; i < 8; i++) R(c, 96 + Math.random() * 10, GROUND - 18 - Math.random() * 10, 2, 2, ['#ffd34d', '#f07418', '#e5484d'][i % 3]) },
+    party(c, arr, t) { if ((t * 2 | 0) !== (arr.lt | 0)) { arr.lt = t * 2; burst(arr, 20 + Math.random() * 70, 30 + Math.random() * 50, ['#ffd34d', '#40f0d0', '#ff8be0'][(Math.random() * 3) | 0]) } } },
+]
+
+// ---------- draw one theme ----------
+function draw(th, c, s, t) {
+  const k = s.cache
+  // sky + bands area (5-hour limit, fills from the bottom part by part)
+  const top = 46, bandH = (GROUND - top) / 10
+  R(c, 0, 0, W, top, mix(th.night, th.day, k))
+  th.sky.call(th, c, k, t)
+  const filled = Math.round(s.h5 / 10)
+  for (let i = 0; i < 10; i++) {
+    const y = GROUND - (i + 1) * bandH
+    const base = mix(mix(th.band, '#000000', 0.55), th.band, 0.35 + 0.65 * k)
+    R(c, 0, y, W, bandH + 0.5, i < filled ? mix(base, STAGE(i), 0.5 + (i === filled - 1 ? 0.12 * Math.sin(t * 4) : 0)) : base)
+    R(c, 0, y, W, 0.5, 'rgba(0,0,0,.25)')
+  }
+  th.decor.call(th, c, t, k)
+  c.fillStyle = 'rgba(255,255,255,.85)'; c.font = '6px monospace'; c.fillText(`5h ${s.h5}%`, 3, GROUND - filled * bandH - 2)
+  // jellyfish = subagents
+  s.agents.forEach((st, i) => {
+    const ph = st === 'done' ? Math.min(1, s.since / 2.5) : 0
+    jelly(c, 20 + i * 34 + Math.sin(t * 0.8 + i) * 6, 180 - i * 18 + Math.sin(t * 1.3 + i) * 5 - ph * 90, { t, state: st, color: th.jelly, zig: th.zig, alpha: 1 - ph })
+  })
+  // ground + 7-day items
+  R(c, 0, GROUND, W, H - GROUND, mix(th.groundNight, th.ground, k))
+  const used = Math.round(s.d7 / 10)
+  for (let i = 0; i < 10; i++) th.item(c, 3 + i * 11.6, H - 4, i < used ? STAGE(i) : 'rgba(255,255,255,.75)')
+  c.fillStyle = 'rgba(0,0,0,.7)'; c.font = '6px monospace'; c.fillText(`7d ${s.d7}%`, 3, H - 12)
+  // building = tasks
+  const done = s.mood === 'done'
+  th.build.call(th, c, Math.min(5, s.tasks), done, t)
+  // crabs
+  const asleep = k <= 0.02 ? 3 : k < 0.4 ? 2 : k < 0.7 ? 1 : 0
+  const frame = (t * 6) | 0
+  const ys = GROUND - 15
+  const compact = s.mood === 'compact', hand = s.mood === 'handoff'
+  if (compact) { R(c, 50, GROUND - 12, 18, 12, '#6b7c93'); R(c, 48, GROUND - 13, 22, 2, '#8a9ab0') }
+  for (let i = 0; i < 3; i++) {
+    let x = 4 + i * 28 + (asleep > i ? 0 : Math.sin(t * 0.9 + i * 2) * 6)
+    let y = ys
+    const o = { t, frame: asleep > i ? 0 : frame + i, sleep: asleep > i }
+    if (s.mood === 'sweat' && i === 0) o.sweat = true
+    if (s.mood === 'angry' && i === 0) o.angry = true
+    if (s.mood === 'q' && i === 1) o.q = true
+    if (done) y = ys - Math.abs(Math.sin(t * 6 + i)) * 4
+    if (compact) { const p = Math.min(1, s.since / 1.5), back = s.since > 3 ? Math.min(1, (s.since - 3) * 2) : 0; x = x + (53 - x) * p * (1 - back); y = y + 6 * p * (1 - back); if (p >= 1 && !back) continue }
+    if (hand && i === 2) { x = x + Math.min(1, s.since / 3) * 70; R(c, x + 19, y + 4, 9, 8, "#8a5a2b"); R(c, x + 22, y + 2, 3, 2, "#5a3a1a"); if (x > W) continue }
+    crab(c, x, y, o)
+    // activity props on crab 1
+    if (i === 1 && s.act && !o.sleep) {
+      if (s.act === 'read') particles(c, th.id + 'dig', a => { if (Math.random() < 0.5) a.push({ x: x + 10, y: y + 14, vx: (Math.random() - 0.5) * 1.2, vy: -0.8 - Math.random() * 0.5, g: 0.06, life: 0.8, col: '#e8d2a0' }) }, t)
+      if (s.act === 'edit') { const sw = Math.sin(t * 10); R(c, x + 20, y + sw * 2, 1.5, 8, "#6b4a2b"); R(c, x + 18.5, y - 1.5 + sw * 2, 5, 3, "#9aa3ad") }
+      if (s.act === 'bash') { R(c, x + 21, y + 3, 13, 10, "#111"); R(c, x + 21, y + 3, 13, 1.5, "#555"); c.fillStyle = "#7cff9e"; c.font = "6px monospace"; c.fillText("$", x + 22.5, y + 11); if ((t * 3 | 0) % 2) R(c, x + 27, y + 9.5, 3, 1.5, "#7cff9e") }
+      if (s.act === 'web') { R(c, x + 10, y - 10, 1.5, 10, "#ccc"); R(c, x + 9, y - 11.5, 3.5, 2.5, "#e5484d"); for (let w = 1; w < 3; w++) { c.strokeStyle = `rgba(124,200,255,${0.8 - w * 0.25})`; c.beginPath(); c.arc(x + 10.5, y - 10, w * 3 + ((t * 8) % 3), -2.6, -0.5); c.stroke() } }
+    }
+  }
+  if (done) particles(c, th.id + 'party', a => th.party.call(th, c, a, t), t)
+}
+
+// ---------- build page ----------
+const grid = document.getElementById('grid')
+const ctxs = THEMES.map(th => {
+  const el = document.createElement('div'); el.className = 'theme'
+  el.innerHTML = `<div class="stage"><canvas width="${W * 2}" height="${H * 2}"></canvas><div class="sessions"><div class="on">Cockpit redesign</div><div>PFA 5G core</div><div>Hoplarm alarm</div><div>ESP32 sensor</div></div></div><h2>${th.name}</h2><p>${th.note}</p>`
+  grid.appendChild(el)
+  const c = el.querySelector('canvas').getContext('2d'); c.imageSmoothingEnabled = false; c.scale(2, 2)
+  return [th, c]
+})
+const jumps = document.getElementById('jumps')
+const seen = new Set()
+for (const st of STEPS) if (st.name !== 'loop' && !seen.has(st.name)) { seen.add(st.name); const b = document.createElement('button'); b.textContent = st.name; b.onclick = () => { clock = st.t + 0.01 }; jumps.appendChild(b) }
+document.getElementById('play').onclick = e => { playing = !playing; e.target.textContent = playing ? 'Pause' : 'Play'; e.target.classList.toggle('on', playing) }
+document.getElementById('sess').onclick = e => { showSess = !showSess; document.body.classList.toggle('hide-sessions', !showSess); e.target.textContent = showSess ? 'Hide session list' : 'Show session list' }
+let t = 0
+function frame(now) {
+  const dt = Math.min(0.1, (now - last) / 1000); last = now; t += dt
+  if (playing) clock = (clock + dt) % LOOP
+  const s = state()
+  // smooth the cache between steps for a gradual fade
+  document.getElementById('now').textContent = `Now: ${s.name}`
+  for (const [th, c] of ctxs) { c.clearRect(0, 0, W, H); draw(th, c, s, t) }
+  requestAnimationFrame(frame)
+}
+requestAnimationFrame(frame)
+</script>
+</body>
+</html>
