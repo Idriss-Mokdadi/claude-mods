@@ -738,3 +738,78 @@ test('the band\'s Handoff button at the critical level starts the same side-chat
   expect(w.appended()).toEqual([])
   await ui.unmount()
 })
+
+// --- Rate limits kept across sessions --------------------------------------
+
+const NO_LIVE = () => ({ ...usageAt(30), rateLimits: [] })
+const SEEN = NOW - 12 * 60_000
+const STORED = [
+  { kind: 'five_hour', percent: 20, resetsAt: '2026-11-04T22:28:00Z', readAt: SEEN },
+  { kind: 'seven_day', percent: 5, resetsAt: '2026-11-08T10:00:00Z', readAt: SEEN },
+]
+
+test('session A: live readings are stored in $.store for later sessions', async ($, on) => {
+  const { w } = await start($, on)
+  expect(w.store.get('cockpit.limits')).toEqual([
+    { kind: 'five_hour', percent: 20, resetsAt: '2026-11-04T22:28:00Z', readAt: NOW },
+    { kind: 'seven_day', percent: 5, resetsAt: '2026-11-08T10:00:00Z', readAt: NOW },
+  ])
+})
+
+for (const surface of SURFACES) {
+  test(`${surface}: session B, before its first reading, shows the stored limits with "last seen"`, async ($, on) => {
+    await start($, on, 30, { usage: NO_LIVE, store: { 'cockpit.limits': STORED, 'cockpit.expanded': true } })
+    const ui = await band($, surface)
+    expect(await ui.find({ type: 'Text', text: say(surface, /⏱️ 5-hour limit 20% · resets in 2h 13m · last seen 12m ago/) })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: say(surface, /📅 7-day limit 5% · resets in 3d 13h · last seen 12m ago/) })).toBeDefined()
+    await ui.unmount()
+  })
+}
+
+test('a stored window whose reset time has passed shows "reset, waiting for a reading", no bar', async ($, on) => {
+  const stale = [{ kind: 'five_hour', percent: 97, resetsAt: '2026-11-04T19:00:00Z', readAt: NOW - 3 * 3_600_000 }, STORED[1]]
+  await start($, on, 30, { usage: NO_LIVE, store: { 'cockpit.limits': stale, 'cockpit.expanded': true } })
+  const ui = await band($, 'terminal')
+  expect(await ui.find({ type: 'Text', text: /⏱️ 5-hour limit reset, waiting for a reading/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /97%/ })).toBeUndefined()
+  // Its 97% does not make the mood angry.
+  const btn = (await ui.find({ key: 'cockpit-usage' })) as unknown as { props: { label: string } }
+  expect(btn.props.label).not.toMatch(/😡/)
+  await ui.unmount()
+})
+
+test('a live reading replaces the stored one, in the band and in $.store', async ($, on) => {
+  const high = [{ kind: 'five_hour', percent: 80, resetsAt: '2026-11-04T22:28:00Z', readAt: SEEN }]
+  const { w } = await start($, on, 30, { usage: NO_LIVE, store: { 'cockpit.limits': high, 'cockpit.expanded': true } })
+  const ui = await band($, 'terminal')
+  expect(await ui.find({ type: 'Text', text: /5-hour limit 80% .*last seen 12m ago/ })).toBeDefined()
+  await measure($, w, 30, 20)
+  expect(await ui.find({ type: 'Text', text: /5-hour limit 20% · resets in 2h 13m/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /last seen/ })).toBeUndefined()
+  expect(w.store.get('cockpit.limits')).toEqual([
+    { kind: 'five_hour', percent: 20, resetsAt: '2026-11-04T22:28:00Z', readAt: NOW },
+    { kind: 'seven_day', percent: 5, resetsAt: '2026-11-08T10:00:00Z', readAt: NOW },
+  ])
+  await ui.unmount()
+})
+
+test('the collapsed mood counts a stored reading, and /usage-panel shows it too', async ($, on) => {
+  const high = [{ kind: 'five_hour', percent: 91, resetsAt: '2026-11-04T22:28:00Z', readAt: SEEN }]
+  await start($, on, 30, { usage: NO_LIVE, store: { 'cockpit.limits': high } })
+  const ui = await band($, 'terminal')
+  const btn = (await ui.find({ key: 'cockpit-usage' })) as unknown as { props: { label: string } }
+  expect(btn.props.label).toMatch(/😡$/)
+  await ui.unmount()
+  const pane = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...PANE } as never)
+  expect(await pane.find({ type: 'Text', text: /5-hour limit 91% .*last seen 12m ago/ })).toBeDefined()
+  await pane.unmount()
+})
+
+test('the app\'s own collapse (isCollapsed) draws only the top row, even when expanded', async ($, on) => {
+  await start($, on, 30, { store: { 'cockpit.expanded': true } })
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', component: 'AbovePrompt', props: { ...BAND.props, isCollapsed: true } } as never)
+  expect(await ui.find({ key: 'cockpit-usage' })).toBeDefined()
+  expect(await ui.find({ key: 'cockpit-full' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Context/ })).toBeUndefined()
+  await ui.unmount()
+})

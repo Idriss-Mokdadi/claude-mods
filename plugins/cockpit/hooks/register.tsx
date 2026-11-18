@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderSurface, SessionMessage, SessionUsage, PluginOptions } from 'claude-code'
 
-import type { Advice, Cache, Handoff, Level, Limit, Mood, PaneData, Snapshot, Tone } from '../types'
+import type { Advice, Cache, Handoff, Level, Limit, Mood, PaneData, Snapshot, StoredLimit, Tone } from '../types'
 import { CLAY, CRAB_CSS, crab, crabText } from './crab'
 import { crabIcon, iconWidth } from './crab-icons'
 import { AI_PROMPT, TIERS, isAmbiguous, tierFromLabel, whyText } from './advisor'
@@ -50,6 +50,8 @@ const alerted = atom({ plugin: 'cockpit', key: 'alerted' } as const, 'ok')
 const handoff = atom({ plugin: 'cockpit', key: 'handoff' } as const, null, { shape: 'ho-2' })
 const expanded = atom({ plugin: 'cockpit', key: 'expanded' } as const, false)
 const showAll = atom({ plugin: 'cockpit', key: 'showAll' } as const, false)
+const storedLimits = atom({ plugin: 'cockpit', key: 'storedLimits' } as const, [], { shape: 'lim-1' })
+const STORE_LIMITS = 'cockpit.limits'
 
 // ---------------------------------------------------------------------------
 // Settings.
@@ -188,10 +190,40 @@ const ttlOf = (c: Cache, s: Snapshot | null): { ms: number; isGuess: boolean } =
   return { ms: (s?.limits.length ?? 0) > 0 ? 3_600_000 : 300_000, isGuess: true }
 }
 
+// Live readings replace stored ones; a stored window whose reset time has
+// passed is dropped. Kept in $.store so a new session (or an app restart) shows
+// the last readings until its first API response brings live ones.
+export const mergeLimits = (stored: readonly StoredLimit[], live: readonly Limit[], at: number): StoredLimit[] => {
+  const fresh = live.map(l => ({ kind: l.kind, percent: l.percent, resetsAt: l.resetsAt, readAt: at }))
+  const kept = stored.filter(x => !fresh.some(f => f.kind === x.kind) && !(x.resetsAt && Date.parse(x.resetsAt) <= at))
+  return [...kept, ...fresh]
+}
+
+const isStoredLimit = (x: unknown): x is StoredLimit =>
+  !!x && typeof x === 'object' && typeof (x as StoredLimit).kind === 'string' && typeof (x as StoredLimit).percent === 'number' && typeof (x as StoredLimit).readAt === 'number'
+
+async function loadStoredLimits($: EngineInterface): Promise<void> {
+  try {
+    const raw = await $.store.get(STORE_LIMITS)
+    const list = Array.isArray(raw) ? raw.filter(isStoredLimit) : []
+    if (list.length) await update($, storedLimits, () => list)
+  } catch {
+    // Nothing stored.
+  }
+}
+
 async function measure($: EngineInterface, u: UsageLike): Promise<void> {
   const at = await $.clock.now()
   const s = snapOf(u, at)
   await update($, snapshot, () => s)
+  if (s.limits.length) {
+    const merged = await update($, storedLimits, prev => mergeLimits(prev, s.limits, at))
+    try {
+      await $.store.set(STORE_LIMITS, merged)
+    } catch {
+      // Kept for this session only.
+    }
+  }
   const { pct, what } = budgetOf(s)
   const level = levelOf(pct, opts.warn, opts.crit)
   const prev = await read($, alerted)
@@ -482,6 +514,8 @@ type Line = {
   marker?: number
   // A line with no bar (the session cost).
   noBar?: boolean
+  // A dim remark after the value ("last seen 12m ago").
+  note?: string
 }
 
 const NEUTRAL = '#378ADD'
@@ -513,6 +547,7 @@ async function viewOf($: EngineInterface): Promise<View> {
   const a = opts.advisor ? await read($, advice) : null
   const c = await read($, cache)
   const ho = await read($, handoff)
+  const stored = await read($, storedLimits)
   const cur = await read($, effort)
   const at = Math.max(await read($, now), snap?.at ?? 0)
   const w = opts.warn
@@ -535,11 +570,19 @@ async function viewOf($: EngineInterface): Promise<View> {
     ['five_hour', '⏱️', s.lineFive],
     ['seven_day', '📅', s.lineSeven],
   ] as const) {
-    const l = limitOf(snap, kind)
+    const live = limitOf(snap, kind)
+    const kept = live ? undefined : stored.find(x => x.kind === kind)
+    const l = live ?? kept
     if (!l) continue
+    if (kept?.resetsAt && Date.parse(kept.resetsAt) <= at) {
+      // The stored window has reset since it was read: no number until a reading.
+      lines.push({ key: kind, crab: 'calm', emoji, icon: kind, label, value: s.limitReset, pct: 0, tone: null, end: '', noBar: true })
+      continue
+    }
     const t = toneOf(l.percent, w, k)
     const reset = resetIn(l, at)
-    lines.push({ key: kind, crab: crabFor(t), emoji, icon: kind, label, value: `${Math.round(l.percent)}%${reset ? ` · ${s.resetsIn} ${reset}` : ''}`, pct: l.percent, tone: t })
+    const note = kept ? fill(s.lastSeen, { ago: fmtSpan(at - kept.readAt) }) : undefined
+    lines.push({ key: kind, crab: crabFor(t), emoji, icon: kind, label, value: `${Math.round(l.percent)}%${reset ? ` · ${s.resetsIn} ${reset}` : ''}`, note, pct: l.percent, tone: t })
   }
   if (snap?.costUsd !== null && snap?.costUsd !== undefined) {
     // Cost has no budget: the line shows the amount alone, with no bar.
@@ -675,6 +718,7 @@ export const register: Register = (on, options) => {
     } catch {
       // Collapsed by default.
     }
+    await loadStoredLimits($)
     try {
       await measure($, await $.session.usage())
     } catch {
@@ -804,7 +848,8 @@ export const register: Register = (on, options) => {
     const isUp = await read($, expanded)
     const size = sizeOf(e.props.bodyColumns, e.surface !== 'terminal' && 'Svg' in ui)
     const top = topRow(ui, $, v, size, isUp, below)
-    if (!isUp) return top
+    // Collapsed by us, or by the person (the app's own collapse): the top row.
+    if (!isUp || e.props.isCollapsed) return top
     const layout = bandLayout(v, e.props.bodyColumns, e.props.maxRows, size.isSvg, topRowsOf(v, e.props.bodyColumns, below !== null))
     return (
       <Box flexDirection="column">
@@ -962,7 +1007,7 @@ function rowText(lines: Line[], avail: number, isSvg: boolean): string {
   return lines
     .map(l => {
       const end = isSvg ? '' : lineEnd(l)
-      const base = `${isSvg ? '' : l.emoji + ' '}${l.label} ${l.value}${end ? ' ' + end : ''}`
+      const base = `${isSvg ? '' : l.emoji + ' '}${l.label} ${l.value}${l.note ? ' · ' + l.note : ''}${end ? ' ' + end : ''}`
       if (l.key === 'model' && l.why && `${base} · ${l.why}`.length <= avail) return `${base} · ${l.why}`
       return base
     })
@@ -1064,6 +1109,7 @@ function bandRow(ui: UI, $: EngineInterface, v: View, r: BandRow, size: Size, ha
                 {i > 0 ? '   ' : ''}
                 {size.isSvg ? '' : `${l.emoji} `}
                 <Text bold>{l.label}</Text> <Text color={l.tone ? TONE_COLOR[l.tone] : undefined}>{l.value}</Text>
+                {l.note ? <Text dimColor> · {l.note}</Text> : ''}
                 {l.key === 'model' && l.why && r.text.includes(l.why) ? <Text dimColor> · {l.why}</Text> : ''}
                 {size.isSvg ? '' : lineEnd(l) ? ` ${lineEnd(l)}` : ''}
               </Text>
@@ -1172,11 +1218,13 @@ function lineEl(ui: UI, l: Line, size: Size, extra: unknown = null) {
           {size.isSvg ? (
             <Text>
               <Text bold>{l.label}</Text> <Text color={l.tone ? TONE_COLOR[l.tone] : undefined}>{l.value}</Text>
+                {l.note ? <Text dimColor> · {l.note}</Text> : ''}
               {l.why ? <Text dimColor> · {l.why}</Text> : ''}
             </Text>
           ) : (
             <Text>
               {l.emoji} <Text bold>{l.label}</Text> <Text color={l.tone ? TONE_COLOR[l.tone] : undefined}>{l.value}</Text>
+                {l.note ? <Text dimColor> · {l.note}</Text> : ''}
               {l.why ? <Text dimColor> · {l.why}</Text> : ''}
               {end ? ` ${end}` : ''}
             </Text>

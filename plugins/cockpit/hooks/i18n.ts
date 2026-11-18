@@ -3,6 +3,8 @@
 export type Lang = 'en' | 'fr' | 'ar'
 
 const en = {
+  lastSeen: 'last seen {ago} ago',
+  limitReset: 'reset, waiting for a reading',
   handoffIntro: 'Writes a complete handoff for a new chat from this one, in one side call over the cached chat. Nothing is added to the chat.',
   handoffStart: 'Write handoff',
   handoffCold: 'Cache is cold: this handoff will read the whole chat at full price (≈{usd}). Continue?',
@@ -96,6 +98,8 @@ const en = {
 export type Strings = typeof en
 
 const fr: Strings = {
+  lastSeen: 'vu il y a {ago}',
+  limitReset: 'remise à zéro, en attente d’une mesure',
   handoffIntro: 'Rédige une passation complète pour un nouveau chat, en un appel parallèle sur le chat en cache. Rien n’est ajouté au chat.',
   handoffStart: 'Rédiger la passation',
   handoffCold: 'Le cache est froid : cette passation relira tout le chat au plein tarif (≈{usd}). Continuer ?',
@@ -187,6 +191,8 @@ const fr: Strings = {
 }
 
 const ar: Strings = {
+  lastSeen: 'آخر قراءة قبل {ago}',
+  limitReset: 'أُعيد الضبط، بانتظار قراءة',
   handoffIntro: 'يكتب تسليماً كاملاً لمحادثة جديدة، باستدعاء جانبي واحد على المحادثة المخزنة. لا يُضاف شيء إلى المحادثة.',
   handoffStart: 'اكتب التسليم',
   handoffCold: 'الذاكرة المؤقتة باردة: سيقرأ هذا التسليم المحادثة كلها بالسعر الكامل (≈{usd}). متابعة؟',

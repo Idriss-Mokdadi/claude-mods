@@ -8,6 +8,10 @@ export type Tone = 'green' | 'yellow' | 'orange' | 'red'
 
 export type Limit = { kind: string; percent: number; resetsAt?: string }
 
+// The last reading of a rate-limit window, kept across sessions in $.store: the
+// live reading is empty until this process's first API response.
+export type StoredLimit = { kind: string; percent: number; resetsAt?: string; readAt: number }
+
 export type Snapshot = {
   contextPercent: number | null
   contextTokens: number | null
@@ -101,6 +105,7 @@ declare module 'claude-code' {
       handoff: Shaped<Handoff | null>
       expanded: boolean
       showAll: boolean
+      storedLimits: Shaped<StoredLimit[]>
     }
   }
 }

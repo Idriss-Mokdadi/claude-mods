@@ -29,6 +29,8 @@ The band is laid out to fit the window the app gives it (`maxRows`; a taller ban
 
 ![Full list pane](docs/v05-fulllist-pane-60col-dark.png)
 
+**Limits after a restart.** The 5-hour and 7-day readings arrive only with this process's first API response. Cockpit keeps the last readings (percent, reset time, when read) in `$.store`, shared across sessions, and shows them until a live one comes, with a dim `· last seen 12m ago`; "resets in" is worked out again from the stored reset time. A stored window whose reset time has passed shows `reset, waiting for a reading`, with no bar and no effect on the mood. A live reading always replaces the stored one. When the app collapses the band itself, only the top row is drawn.
+
 Bar colours: green under 50%, yellow 50-70%, orange 70-85%, red over 85%.
 
 **`/usage-panel`** shows everything: the limit lines and the full list (the only view on mobile, which has no band).
